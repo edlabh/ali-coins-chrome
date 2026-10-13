@@ -103,6 +103,12 @@ Decisões de projeto relevantes:
   vive em `chrome.storage.session`, então o run sobrevive a reinícios do service worker.
 - **Keepalive**: durante um run o SW faz um ping de API a cada 20s para não ser encerrado
   pelo limite de inatividade do MV3.
+- **Emulação Pixel 8 em duas camadas**: o `declarativeNetRequest` reescreve o header
+  `User-Agent` (regra com `resourceTypes` explícito — incluindo `main_frame` — e
+  domínios do AliExpress + controle de risco) e um content script no **MAIN world**
+  spoofa `navigator.userAgent`/`userAgentData`/`maxTouchPoints` apenas na aba de
+  execução. A janela é criada em `about:blank` e só navega **depois** das regras
+  ativas, garantindo que o primeiro carregamento já renderize a variante mobile.
 - **Captcha**: a resolução é sempre manual (a extensão não tenta deslizar o desafio).
   Detecção por `#nc_1_n1z`, `.btn_slide`, containers `nocaptcha`/`baxia` e iframes.
 - **Tarefas de app** (Prize Land, minigames, quizzes, avaliações) são ignoradas por padrão,

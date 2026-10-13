@@ -169,7 +169,16 @@ test('manifest.json é MV3, tem content script, alarmes e DNR', () => {
   assert.ok(manifest.permissions.includes('declarativeNetRequest'));
   assert.ok(manifest.host_permissions.some((h) => h.includes('aliexpress.com')));
   assert.ok(manifest.content_scripts[0].js.includes('src/content/bridge.js'));
+  assert.equal(manifest.content_scripts[0].run_at, 'document_start');
   assert.ok(manifest.icons['128']);
+});
+
+test('manifest declara o spoof de navigator no MAIN world em document_start', () => {
+  const manifest = JSON.parse(readFileSync(path.join(root, 'manifest.json'), 'utf8'));
+  const mainWorld = manifest.content_scripts.find((cs) => cs.world === 'MAIN');
+  assert.ok(mainWorld, 'entrada MAIN world ausente no manifest');
+  assert.ok(mainWorld.js.includes('src/content/main-world.js'));
+  assert.equal(mainWorld.run_at, 'document_start');
 });
 
 test('arquivos referenciados no manifest existem', () => {
@@ -180,7 +189,7 @@ test('arquivos referenciados no manifest existem', () => {
     manifest.options_page,
     ...Object.values(manifest.icons),
     ...Object.values(manifest.action.default_icon),
-    ...manifest.content_scripts[0].js
+    ...manifest.content_scripts.flatMap((cs) => cs.js)
   ];
   for (const f of files) {
     assert.doesNotThrow(() => readFileSync(path.join(root, f)), `arquivo ausente: ${f}`);
@@ -211,4 +220,39 @@ test('content scripts carregam em ordem sem erros e expõem AC.actions', () => {
   assert.equal(typeof AC.actions.doCheckin, 'function');
   assert.equal(typeof AC.actions.extractTasks, 'function');
   assert.equal(typeof AC.actions.runAction, 'function');
+});
+
+test('main-world spoofa navigator apenas na aba de execução', () => {
+  const code = readFileSync(path.join(root, 'src/content/main-world.js'), 'utf8');
+  const sandbox = { console };
+  sandbox.self = sandbox;
+  sandbox.location = { hash: '' };
+  sandbox.sessionStorage = {
+    _v: null,
+    getItem() {
+      return this._v;
+    },
+    setItem(key, value) {
+      if (key === 'ac_run') this._v = value;
+    }
+  };
+  vm.createContext(sandbox);
+
+  // Simula o Navigator.prototype do navegador (getter original de userAgent).
+  vm.runInContext(
+    "Object.defineProperty(Object.prototype, 'userAgent', { get: function () { return 'desktop-UA'; }, configurable: true }); var navigator = {};",
+    sandbox
+  );
+
+  vm.runInContext(code, sandbox, { filename: 'main-world.js' });
+
+  // Sem a marca, permanece desktop (abas normais do usuário não são afetadas).
+  assert.equal(sandbox.navigator.userAgent, 'desktop-UA');
+
+  // Com a marca, o spoof mobile entra em ação.
+  sandbox.sessionStorage.setItem('ac_run', '1');
+  assert.match(sandbox.navigator.userAgent, /Pixel 8/);
+  assert.equal(sandbox.navigator.maxTouchPoints, 5);
+  assert.equal(sandbox.navigator.userAgentData.mobile, true);
+  assert.equal(sandbox.navigator.userAgentData.platform, 'Android');
 });

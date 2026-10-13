@@ -24,10 +24,10 @@ import {
 import {
   applyDeviceRules,
   closeOrphanTabs,
-  ensureRunWindow,
   focusWindow,
   isCoinUrl,
   navigateTab,
+  prepareRunTab,
   sleep,
   waitTabComplete
 } from './tabs.js';
@@ -134,14 +134,14 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
 
     if (await isStopRequestedNow()) throw new RunAbortedError();
 
-    // 1. Janela + regras de rede (Pixel 8)
-    const win = await ensureRunWindow(settings);
+    // 1. Janela + regras de rede (Pixel 8) + primeira navegação JÁ em mobile.
+    // prepareRunTab cria a janela em about:blank, aplica as regras de UA na aba
+    // e só então navega para a central de moedas (com #ac_run=1, consumido pelo
+    // content script para o spoof de navigator no MAIN world).
+    const win = await prepareRunTab(ctx.settings);
     ctx.windowId = win.windowId;
     ctx.tabId = win.tabId;
     await patchRunState({ tabId: ctx.tabId, windowId: ctx.windowId });
-    await applyDeviceRules(ctx.tabId, settings);
-    await waitTabComplete(ctx.tabId, 45000);
-    await sleep(1500);
 
     // 2. Autenticação
     await updatePhase(PHASE.AUTH, 'Autenticando no AliExpress…');

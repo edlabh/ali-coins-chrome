@@ -5,7 +5,7 @@
 import { MSG } from '../common/constants.js';
 import { startRun, requestStop } from './runner.js';
 import { installScheduler, scheduleDaily } from './scheduler.js';
-import { ensureRunWindow } from './tabs.js';
+import { prepareRunTab } from './tabs.js';
 import { getRunState, getRuntime, getSettings, pushReport } from './storage.js';
 
 installScheduler();
@@ -63,7 +63,7 @@ async function handleMessage(message, sender) {
 
     case MSG.OPEN_WINDOW: {
       const settings = await getSettings();
-      const win = await ensureRunWindow(settings);
+      const win = await prepareRunTab(settings);
       return { ok: true, ...win };
     }
 
@@ -72,9 +72,14 @@ async function handleMessage(message, sender) {
       return { ok: true };
     }
 
-    // O content script anuncia que carregou (usado para depuração e futuras esperas).
+    // O content script anuncia que carregou. A resposta confirma se a aba atual
+    // é a aba de execução (usada pelo bridge para marcar sessionStorage `ac_run`,
+    // que autoriza o spoof de navigator no MAIN world).
     case MSG.CONTENT_READY: {
-      return { ok: true };
+      const runState = await getRunState();
+      const tabId = sender && sender.tab ? sender.tab.id : null;
+      const runTab = Boolean(runState && runState.active && tabId && runState.tabId === tabId);
+      return { ok: true, runTab, runId: runTab ? runState.runId : null };
     }
 
     case MSG.CONTENT_PROGRESS: {

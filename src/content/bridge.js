@@ -54,10 +54,39 @@
     return true;
   });
 
-  // Anuncia a presença do content script (útil para diagnóstico).
+  // Marca a aba como "aba de execução" para o spoof de navigator do MAIN world
+  // (src/content/main-world.js). Duas fontes:
+  //  1) hash `#ac_run=1` presente na navegação inicial disparada pelo runner;
+  //  2) confirmação do service worker na resposta ao CONTENT_READY.
+  function markRunTab() {
+    try {
+      sessionStorage.setItem('ac_run', '1');
+    } catch {
+      /* sessionStorage indisponível: o hash cobre a primeira navegação */
+    }
+  }
+
+  try {
+    if (location.hash && location.hash.indexOf('ac_run') !== -1) {
+      markRunTab();
+      // Remove o marcador da URL (o SPA reescreve a location logo em seguida).
+      try {
+        history.replaceState(null, '', location.pathname + location.search);
+      } catch {
+        /* SPA sem history API: mantém o hash, inofensivo */
+      }
+    }
+  } catch {
+    /* ignora */
+  }
+
+  // Anuncia a presença do content script e confirma se esta é a aba de execução.
   try {
     chrome.runtime
       .sendMessage({ type: 'CONTENT_READY', payload: { url: location.href } })
+      .then((res) => {
+        if (res && res.runTab) markRunTab();
+      })
       .catch(() => {});
   } catch {
     // runtime indisponível (ex.: contexto invalidado): ignora
