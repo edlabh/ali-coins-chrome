@@ -41,6 +41,33 @@ body {
   font-size: 15px;
 }
 
+.titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.icon-btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--muted);
+  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  flex: none;
+}
+
+.icon-btn:hover {
+  background: #f3f4f6;
+  color: var(--text);
+}
+
 .subtitle {
   margin: 0;
   font-size: 11px;
