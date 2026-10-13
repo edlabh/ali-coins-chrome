@@ -263,6 +263,31 @@
   }
 
   /**
+   * Prioriza a fonte da sequência (streak), na ordem que reflete o site:
+   *   1. número principal do calendário (`dayNumber`, total de dias);
+   *   2. modal de quebra (`brokenDays`, "{0} Streak lost");
+   *   3. varredura estrutural / padrões textuais com valor > 7 (sequência real,
+   *      nunca o ciclo semanal 1..7);
+   *   4. padrão textual simples como último recurso.
+   * Função pura (testável) — a coleta dos candidatos acontece no chamador.
+   * @param {{dayNumber?: (number|null), brokenDays?: (number|null), textBest?: (number|null), structural?: (number|null), textFallback?: (number|null)}} candidates
+   * @returns {number|null}
+   */
+  function pickStreakCandidate({
+    dayNumber = null,
+    brokenDays = null,
+    textBest = null,
+    structural = null,
+    textFallback = null
+  } = {}) {
+    if (Number.isFinite(dayNumber) && dayNumber >= 1) return dayNumber;
+    if (Number.isFinite(brokenDays) && brokenDays >= 1) return brokenDays;
+    if (Number.isFinite(structural) && structural > 7) return structural;
+    if (Number.isFinite(textBest) && textBest > 7) return textBest;
+    return Number.isFinite(textFallback) ? textFallback : null;
+  }
+
+  /**
    * Fecha modais/toasts com segurança: apenas elementos de fechar dentro de
    * containers de diálogo/overlay (como closeModals do ali-coins).
    */
@@ -393,6 +418,7 @@
     findByText,
     findAllByText,
     readStreakFromStructure,
+    pickStreakCandidate,
     closeModals,
     captchaInfo,
     parseNumber,

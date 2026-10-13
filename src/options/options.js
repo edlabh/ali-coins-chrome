@@ -159,7 +159,6 @@ async function load() {
   $('pauseMaxS').value = Math.round((s.pauseBetweenTasksMaxMs ?? 20000) / 1000);
   $('searchQuery').value = s.searchQuery || 'fone bluetooth';
   $('scrollSeconds').value = s.scrollSeconds ?? 10;
-  $('streakBase').value = s.streakBase ?? '';
 
   $('captchaTimeoutMin').value = s.captchaTimeoutMin ?? 5;
   $('riskCooldownHours').value = s.riskCooldownHours ?? 48;
@@ -202,7 +201,6 @@ async function save() {
     pauseBetweenTasksMaxMs: pauseMaxS * 1000,
     searchQuery: $('searchQuery').value.trim() || 'fone bluetooth',
     scrollSeconds: toInt($('scrollSeconds').value, 10),
-    streakBase: toInt($('streakBase').value, 0) || null,
 
     captchaTimeoutMin: toInt($('captchaTimeoutMin').value, 5),
     riskCooldownHours: toInt($('riskCooldownHours').value, 48),

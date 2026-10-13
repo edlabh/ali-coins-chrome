@@ -125,11 +125,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   customHeight: 915,
   keepWindowOpen: false, // por padrão a janela mobile é FECHADA ao concluir (configurável)
   silentMode: false, // execução em segundo plano: aba de fundo, sem abrir janela (captcha traz para frente)
-  notifications: true,
-
-  // Contabilidade: piso manual da sequência (dias) para quando a tela mostra só
-  // o ciclo semanal (1..7) e você conhece a sequência real (ex.: 240).
-  streakBase: null
+  notifications: true
 });
 
 export const RUN_HISTORY_LIMIT = 20;

@@ -128,11 +128,11 @@ Decisões de projeto relevantes:
   do extrato > modal mobile > estimativa pela sequência, compensa o saldo quando o
   crédito do check-in ainda não apareceu e calcula o ganho das tarefas pelo **delta de
   saldo**. Sequência quebrada gera alerta (log + notificação + extrato).
-  A sequência tem tratamento **anti-ciclo-semanal**: leituras textuais e **estruturais**
-  (elementos com classe de *streak*/sequência, mesmo sem a palavra "dias" ao lado) que
-  sejam > 7 têm prioridade sobre o calendário 1–7 da tela, o consolidado nunca é
-  rebaixado sem quebra confirmada e há o campo opcional **Sequência conhecida (dias)**
-  nas Opções para informar o valor real (ex.: 240) quando as telas mostrarem apenas o ciclo.
+  A sequência é lida **direto do site**: o número principal do calendário da central
+  de moedas (classe `dayNumber`, que o próprio AliExpress usa para o total — ex.:
+  "240 day(s) streak") e o modal de quebra (`brokenDays`), com fallbacks textuais e
+  estruturais; valores > 7 têm prioridade sobre o ciclo semanal 1–7 e o consolidado
+  nunca é rebaixado sem quebra confirmada — sem valores manuais/hardcoded.
 - **Cliques confiáveis (CDP)**: botões que ignoram eventos sintéticos (o painel
   "Ganhe mais moedas" é um caso real) recebem cliques REAIS via `chrome.debugger`
   (`Input.dispatchMouseEvent` — o mesmo mecanismo do Playwright no ali-coins),

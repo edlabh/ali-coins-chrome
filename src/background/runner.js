@@ -30,8 +30,7 @@ import {
   getSettings,
   patchRunState,
   patchRuntime,
-  pushReport,
-  saveSettings
+  pushReport
 } from './storage.js';
 import {
   applyDeviceRules,
@@ -292,14 +291,7 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
     }
 
     const runtimeState = await getRuntime();
-    const storedStreak = Number.isFinite(runtimeState.lastStreak) ? runtimeState.lastStreak : null;
-    // Piso manual (Opções): útil quando a tela mostra apenas o ciclo semanal
-    // (1..7) e você conhece a sequência real (ex.: 240 dias).
-    const manualStreak =
-      Number.isFinite(ctx.settings.streakBase) && ctx.settings.streakBase > 0
-        ? ctx.settings.streakBase
-        : null;
-    const previousStreak = Math.max(storedStreak || 0, manualStreak || 0) || null;
+    const previousStreak = Number.isFinite(runtimeState.lastStreak) ? runtimeState.lastStreak : null;
 
     const acct = accountCheckin({
       mobileCheckin,
@@ -374,8 +366,6 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
         message: `A sequência foi interrompida: ontem com ${previousStreak} dias, hoje em ${acct.streakDays}.`,
         requireInteraction: true
       });
-      // Quebra confirmada: o piso manual deixa de valer para não ressuscitar o valor antigo.
-      await saveSettings({ streakBase: null }).catch(() => {});
     }
     if (ctx.balanceBefore !== null) {
       await appendLog(ctx, `Saldo no extrato (antes do crédito do dia): ${ctx.balanceBefore} moedas.`);

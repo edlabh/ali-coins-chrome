@@ -507,6 +507,25 @@ test('ledger: streakFromText prefere valores > 7 (ciclo semanal vs sequência re
   assert.equal(streakFromText('+40 moedas'), null);
 });
 
+test('dom: pickStreakCandidate prioriza o número do site (dayNumber)', () => {
+  const sandbox = { self: {} };
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync(path.join(root, 'src/content/dom.js'), 'utf8'), sandbox, {
+    filename: 'dom.js'
+  });
+  const pick = sandbox.self.AC.dom.pickStreakCandidate;
+
+  // Fonte primária: número do calendário do próprio site (240), mesmo com o
+  // valor do ciclo semanal (7) presente no texto.
+  assert.equal(pick({ dayNumber: 240, textFallback: 7 }), 240);
+  assert.equal(pick({ brokenDays: 240, textFallback: 7 }), 240);
+  assert.equal(pick({ structural: 240, textFallback: 7 }), 240);
+  assert.equal(pick({ textBest: 240, textFallback: 7 }), 240);
+  // Sem nenhuma fonte > 7, vale o valor textual simples (contas novas).
+  assert.equal(pick({ textFallback: 7 }), 7);
+  assert.equal(pick({}), null);
+});
+
 test('accounting: tiers de moedas por dia de sequência', () => {
   assert.equal(coinsFromStreak(1), 10);
   assert.equal(coinsFromStreak(2), 15);

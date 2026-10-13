@@ -221,25 +221,58 @@
     return S.checkin.todayTextPattern.test(bodyText(8000));
   }
 
+  /**
+   * Lê a sequência (streak) DIRETO da página, com as fontes que o próprio site usa:
+   *   1. `[class*="dayNumber"]` — número principal do calendário (o bundle do site
+   *      usa essa classe para o TOTAL de dias, com fonte especial >100 e classe
+   *      `a4` >999; ex.: "240  day(s) streak"). O rótulo "day(s) streak" tem
+   *      parênteses e não casa com padrões de texto — por isso o elemento manda;
+   *   2. `[class*="brokenDays"]` — modal "{0} Streak lost" (também traz o total);
+   *   3. padrões textuais (preferem valores > 7 sobre o ciclo semanal 1..7);
+   *   4. varredura estrutural (badges com classe/id de streak).
+   */
   function readStreak() {
+    let dayNumber = null;
+    for (const el of document.querySelectorAll('[class*="dayNumber"]')) {
+      if (!AC.dom.isVisible(el)) continue;
+      const m = (el.innerText || el.textContent || '').trim().match(/^([0-9]{1,6})$/);
+      if (m) {
+        const n = Number.parseInt(m[1], 10);
+        if (dayNumber === null || n > dayNumber) dayNumber = n;
+      }
+    }
+
+    let brokenDays = null;
+    for (const el of document.querySelectorAll('[class*="brokenDays"]')) {
+      if (!AC.dom.isVisible(el)) continue;
+      const m = (el.innerText || el.textContent || '').match(/([0-9]{1,6})/);
+      if (m) {
+        brokenDays = Number.parseInt(m[1], 10);
+        break;
+      }
+    }
+
     const text = bodyText(12000);
-    let fallback = null;
-    let best = null;
-    // O calendário semanal exibe o ciclo (1..7); varre TODAS as ocorrências dos
-    // padrões e prefere valores > 7 (sequência real, ex.: 240 dias).
+    let textFallback = null;
+    let textBest = null;
     for (const re of S.coin.streakPatterns) {
       const global = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
       for (const m of text.matchAll(global)) {
         const n = Number.parseInt(m[1], 10);
         if (!Number.isFinite(n) || n < 1) continue;
-        if (fallback === null) fallback = n;
-        if (n > 7 && (best === null || n > best)) best = n;
+        if (textFallback === null) textFallback = n;
+        if (n > 7 && (textBest === null || n > textBest)) textBest = n;
       }
     }
-    // Varredura estrutural (badge de sequência sem a palavra "dias" ao lado).
+
     const structural = AC.dom.readStreakFromStructure();
-    if (structural !== null && (best === null || structural > best)) best = structural;
-    return best !== null ? best : fallback;
+    return AC.dom.pickStreakCandidate({
+      dayNumber,
+      brokenDays,
+      textBest,
+      structural,
+      textFallback
+    });
   }
 
   function readBalance() {
