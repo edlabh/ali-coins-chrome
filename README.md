@@ -172,8 +172,8 @@ Decisões de projeto relevantes:
 ## Desenvolvimento
 
 ```bash
-npm ci          # devDependencies (apenas ESLint — runtime não tem dependências)
-npm test        # testes unitários (node --test) da lógica pura
+npm ci          # devDependencies (ESLint + jsdom; o runtime não tem dependências)
+npm test        # testes unitários + testes de DOM (jsdom) dos content scripts
 npm run check   # checagem de sintaxe de todos os módulos
 npm run lint    # ESLint (configuração flat)
 npm run icons   # regera os ícones (tools/make-icons.py)
