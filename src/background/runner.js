@@ -20,7 +20,8 @@ import {
 import {
   accountCheckin,
   computeTasksCoinsGained,
-  desktopStreakOf
+  desktopStreakOf,
+  protectConsolidatedStreak
 } from '../common/accounting.js';
 import {
   getPassword,
@@ -29,7 +30,8 @@ import {
   getSettings,
   patchRunState,
   patchRuntime,
-  pushReport
+  pushReport,
+  saveSettings
 } from './storage.js';
 import {
   applyDeviceRules,
@@ -290,7 +292,14 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
     }
 
     const runtimeState = await getRuntime();
-    const previousStreak = Number.isFinite(runtimeState.lastStreak) ? runtimeState.lastStreak : null;
+    const storedStreak = Number.isFinite(runtimeState.lastStreak) ? runtimeState.lastStreak : null;
+    // Piso manual (Opções): útil quando a tela mostra apenas o ciclo semanal
+    // (1..7) e você conhece a sequência real (ex.: 240 dias).
+    const manualStreak =
+      Number.isFinite(ctx.settings.streakBase) && ctx.settings.streakBase > 0
+        ? ctx.settings.streakBase
+        : null;
+    const previousStreak = Math.max(storedStreak || 0, manualStreak || 0) || null;
 
     const acct = accountCheckin({
       mobileCheckin,
@@ -304,6 +313,13 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
     ctx.balanceBefore = earlyLedger?.totalBalance ?? null;
     const initialBalanceForTasks =
       acct.balanceAfterCheckin ?? mobileCheckin.balance ?? ctx.balanceBefore;
+
+    // Diagnóstico das fontes da sequência: ajuda a diferenciar o ciclo semanal
+    // (1..7) da sequência real (ex.: 240) em caso de leitura suspeita.
+    await appendLog(
+      ctx,
+      `Sequência (fontes): mobile=${mobileCheckin.streak ?? 'N/D'}, extrato=${acct.statementStreak ?? 'N/D'}, consolidado=${previousStreak ?? 'N/D'} → ${acct.streakDays}.`
+    );
 
     if (acct.justCollected) {
       const src = acct.coinsSource ? ` (${coinsSourceLabel(acct.coinsSource)})` : '';
@@ -328,9 +344,25 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
     if (acct.balanceAdjusted) {
       await appendLog(ctx, 'Saldo sincronizado com o crédito do check-in (extrato defasado).');
     }
+
+    // Protege o consolidado: uma leitura do ciclo semanal (≤7) nunca rebaixa um
+    // histórico maior conhecido sem quebra confirmada.
     if (typeof acct.streakDays === 'number') {
+      const protectedStreak = protectConsolidatedStreak({
+        next: acct.streakDays,
+        previous: previousStreak,
+        streakBroken: acct.streakBroken
+      });
+      if (protectedStreak !== acct.streakDays) {
+        await appendLog(
+          ctx,
+          `Leitura de sequência (${acct.streakDays}) abaixo do consolidado (${previousStreak}) e sem quebra confirmada — mantendo ${protectedStreak} dias.`
+        );
+        acct.streakDays = protectedStreak;
+      }
       await appendLog(ctx, `Sequência de check-in: ${acct.streakDays} dias.`);
     }
+
     if (acct.streakBroken) {
       await appendLog(
         ctx,
@@ -342,6 +374,8 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
         message: `A sequência foi interrompida: ontem com ${previousStreak} dias, hoje em ${acct.streakDays}.`,
         requireInteraction: true
       });
+      // Quebra confirmada: o piso manual deixa de valer para não ressuscitar o valor antigo.
+      await saveSettings({ streakBase: null }).catch(() => {});
     }
     if (ctx.balanceBefore !== null) {
       await appendLog(ctx, `Saldo no extrato (antes do crédito do dia): ${ctx.balanceBefore} moedas.`);

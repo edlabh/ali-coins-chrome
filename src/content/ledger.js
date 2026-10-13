@@ -69,19 +69,29 @@
 
   /**
    * Extrai o número de dias de sequência de um texto qualquer (multilíngue).
+   * O calendário semanal do AliExpress exibe valores do ciclo (1..7); valores
+   * maiores que 7 são a sequência REAL e têm prioridade sobre eles (o valor do
+   * ciclo só é usado quando não há nenhum > 7 no texto).
    * @param {string} text
    * @returns {number|null}
    */
   function streakFromText(text) {
     if (!text || typeof text !== 'string') return null;
+    let fallback = null;
+    let best = null;
     for (const regex of STREAK_PATTERNS) {
-      const m = text.match(regex);
-      if (m) {
+      const global = new RegExp(
+        regex.source,
+        regex.flags.includes('g') ? regex.flags : `${regex.flags}g`
+      );
+      for (const m of text.matchAll(global)) {
         const val = parseInt(m[1], 10);
-        if (!Number.isNaN(val) && val >= 1) return val;
+        if (!Number.isFinite(val) || val < 1) continue;
+        if (fallback === null) fallback = val;
+        if (val > 7 && (best === null || val > best)) best = val;
       }
     }
-    return null;
+    return best !== null ? best : fallback;
   }
 
   /**

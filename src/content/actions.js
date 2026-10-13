@@ -223,14 +223,20 @@
 
   function readStreak() {
     const text = bodyText(12000);
+    let fallback = null;
+    let best = null;
+    // O calendário semanal exibe o ciclo (1..7); varre TODAS as ocorrências dos
+    // padrões e prefere valores > 7 (sequência real, ex.: 240 dias).
     for (const re of S.coin.streakPatterns) {
-      const m = text.match(re);
-      if (m) {
+      const global = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
+      for (const m of text.matchAll(global)) {
         const n = Number.parseInt(m[1], 10);
-        if (Number.isFinite(n) && n >= 1) return n;
+        if (!Number.isFinite(n) || n < 1) continue;
+        if (fallback === null) fallback = n;
+        if (n > 7 && (best === null || n > best)) best = n;
       }
     }
-    return null;
+    return best !== null ? best : fallback;
   }
 
   function readBalance() {

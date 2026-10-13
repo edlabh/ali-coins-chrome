@@ -128,6 +128,10 @@ Decisões de projeto relevantes:
   do extrato > modal mobile > estimativa pela sequência, compensa o saldo quando o
   crédito do check-in ainda não apareceu e calcula o ganho das tarefas pelo **delta de
   saldo**. Sequência quebrada gera alerta (log + notificação + extrato).
+  A sequência tem tratamento **anti-ciclo-semanal**: leituras > 7 dias têm prioridade
+  sobre o calendário 1–7 da tela, o consolidado nunca é rebaixado sem quebra confirmada
+  e há o campo opcional **Sequência conhecida (dias)** nas Opções para informar o valor
+  real (ex.: 240) quando as telas mostrarem apenas o ciclo.
 - **Cliques confiáveis (CDP)**: botões que ignoram eventos sintéticos (o painel
   "Ganhe mais moedas" é um caso real) recebem cliques REAIS via `chrome.debugger`
   (`Input.dispatchMouseEvent` — o mesmo mecanismo do Playwright no ali-coins),

@@ -267,6 +267,22 @@ export function resolveStreakDays({
 }
 
 /**
+ * Protege o streak consolidado contra leituras do ciclo semanal (≤7) quando já
+ * existe um histórico maior conhecido. O original faz isso via `baseStreak`
+ * acumulado nas sessões; aqui a proteção também é aplicada na persistência,
+ * para que uma leitura como "7" nunca rebaixe um consolidado de 240 dias sem
+ * uma quebra CONFIRMADA (current === 1 com histórico anterior > 1).
+ * @param {{next: (number|null), previous: (number|null), streakBroken?: boolean}} params
+ * @returns {number|null}
+ */
+export function protectConsolidatedStreak({ next, previous, streakBroken = false }) {
+  if (!Number.isFinite(next)) return next;
+  if (streakBroken) return next;
+  if (Number.isFinite(previous) && previous > 7 && next <= 7) return previous;
+  return next;
+}
+
+/**
  * Deriva o streak "desktop" de uma leitura do extrato:
  * leitura textual explícita > histórico de datas > tier das moedas do dia.
  * @param {object|null} ledger

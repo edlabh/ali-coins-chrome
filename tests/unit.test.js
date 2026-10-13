@@ -28,7 +28,8 @@ import {
   resolveStreakDays,
   syncBalanceWithCheckin,
   accountCheckin,
-  desktopStreakOf
+  desktopStreakOf,
+  protectConsolidatedStreak
 } from '../src/common/accounting.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -492,6 +493,16 @@ test('ledger: parseBalance, todaySection e readMycoinPage compostos', () => {
   assert.equal(readMycoinPage(enText).todayBonusCoins, 40);
 });
 
+test('ledger: streakFromText prefere valores > 7 (ciclo semanal vs sequência real)', () => {
+  const { streakFromText } = loadLedger();
+  assert.equal(streakFromText('Sequência de 7 dias'), 7);
+  assert.equal(streakFromText('Sequência de 7 dias • 240 dias de sequência'), 240);
+  assert.equal(streakFromText('7-day streak and 212-day streak'), 212);
+  assert.equal(streakFromText('Você completou 21 dias seguidos!'), 21);
+  assert.equal(streakFromText('Dia 4 de 7'), null);
+  assert.equal(streakFromText('+40 moedas'), null);
+});
+
 test('accounting: tiers de moedas por dia de sequência', () => {
   assert.equal(coinsFromStreak(1), 10);
   assert.equal(coinsFromStreak(2), 15);
@@ -593,7 +604,30 @@ test('accounting: desktopStreakOf (texto > histórico > tier)', () => {
   assert.equal(desktopStreakOf({ textStreak: 5, historyStreak: 3, todayBonusCoins: 15 }), 5);
   assert.equal(desktopStreakOf({ textStreak: null, historyStreak: 12, todayBonusCoins: 40 }), 12);
   assert.equal(desktopStreakOf({ textStreak: null, historyStreak: null, todayBonusCoins: 15 }), 2);
+  assert.equal(desktopStreakOf({ textStreak: 240, historyStreak: 12, todayBonusCoins: 40 }), 240);
   assert.equal(desktopStreakOf(null), null);
+});
+
+test('accounting: protectConsolidatedStreak não rebaixa o consolidado sem quebra confirmada', () => {
+  assert.equal(protectConsolidatedStreak({ next: 7, previous: 240 }), 240);
+  assert.equal(protectConsolidatedStreak({ next: 241, previous: 240 }), 241);
+  assert.equal(protectConsolidatedStreak({ next: 1, previous: 240, streakBroken: true }), 1);
+  assert.equal(protectConsolidatedStreak({ next: 5, previous: 5 }), 5);
+  assert.equal(protectConsolidatedStreak({ next: 7, previous: null }), 7);
+  assert.equal(protectConsolidatedStreak({ next: null, previous: 240 }), null);
+});
+
+test('accounting: ciclo semanal (7) não vence consolidado de 240 dias', () => {
+  // Leitura da tela (7) com consolidado de 240 e check-in já coletado → mantém 240.
+  assert.equal(
+    resolveStreakDays({ detectedStreak: 7, previousStreakDays: 240, alreadyCollected: true }).streakDays,
+    240
+  );
+  // Tela mostra a sequência real (240) e o consolidado era o ciclo (7) → adota 240.
+  assert.equal(
+    resolveStreakDays({ detectedStreak: 240, previousStreakDays: 7, justCollected: true }).streakDays,
+    240
+  );
 });
 
 test('accounting: accountCheckin consolida extrato + mobile (já coletado e coleta nova)', () => {
