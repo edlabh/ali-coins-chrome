@@ -96,29 +96,17 @@ export async function ensureRunWindow(settings) {
  * Prepara a aba de execução na ordem correta:
  *   1. garante a janela popup (Pixel 8);
  *   2. aplica as regras de User-Agent/Client Hints mobile na aba;
- *   3. só então navega para a central de moedas (com o hash `#ac_run=1`, que o
- *      content script usa para marcar a aba e é removido logo depois).
+ *   3. navega (ou recarrega) SEMPRE para a central de moedas com o hash
+ *      `#ac_run=1`, que o content script usa para marcar a aba e é removido logo
+ *      depois. Recarregar mesmo em abas já abertas garante que uma página antiga
+ *      carregada em desktop seja substituída pela variante mobile.
  * @param {object} settings
  * @returns {Promise<{windowId: number, tabId: number, reused: boolean}>}
  */
 export async function prepareRunTab(settings) {
   const win = await ensureRunWindow(settings);
   await applyDeviceRules(win.tabId, settings);
-
-  let url = '';
-  try {
-    const tab = await chrome.tabs.get(win.tabId);
-    url = (tab && tab.url) || '';
-  } catch {
-    url = '';
-  }
-
-  if (!isAliexpressUrl(url)) {
-    await navigateTab(win.tabId, `${COIN_URL}#ac_run=1`, 45000);
-  } else {
-    await waitTabComplete(win.tabId, 30000);
-    await sleep(900);
-  }
+  await navigateTab(win.tabId, `${COIN_URL}#ac_run=1`, 45000);
   return win;
 }
 
