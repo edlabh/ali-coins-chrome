@@ -187,11 +187,6 @@ $('btnStop').addEventListener('click', async () => {
   setTimeout(refresh, 400);
 });
 
-$('btnOpen').addEventListener('click', async () => {
-  await chrome.runtime.sendMessage({ type: MSG.OPEN_WINDOW }).catch(() => {});
-  window.close();
-});
-
 $('btnOptions').addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
   window.close();

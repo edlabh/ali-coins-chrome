@@ -228,6 +228,13 @@ $('btnRun').addEventListener('click', async () => {
   else setStatus('Execução iniciada. Acompanhe pelo popup da extensão.', 'ok');
 });
 
+$('btnOpenWindow').addEventListener('click', async () => {
+  setStatus('Abrindo janela mobile…');
+  const res = await chrome.runtime.sendMessage({ type: MSG.OPEN_WINDOW }).catch(() => null);
+  if (res && res.ok) setStatus('Janela mobile (Pixel 8) aberta.', 'ok');
+  else setStatus('Falha ao abrir a janela mobile.', 'error');
+});
+
 $('btnClearCreds').addEventListener('click', async () => {
   await clearCredentials();
   $('user').value = '';
