@@ -79,10 +79,10 @@ export function summarizeTasks(tasks) {
 /**
  * Versão do schema de configurações salvas.
  * v2: a janela mobile passa a ser fechada ao concluir (antes ficava aberta).
- * v3: execução em segundo plano por padrão (a aba só aparece para captcha/2FA);
- *     o run passa a gravar o extrato/log (v2 já incluía).
+ * v3: execução em segundo plano por padrão (a aba só aparece para captcha/2FA).
+ * v4: teto de ações por execução sobe de 25 (padrão antigo) para 60.
  */
-export const SETTINGS_VERSION = 3;
+export const SETTINGS_VERSION = 4;
 
 /**
  * Migra configurações salvas por versões anteriores.
@@ -108,6 +108,15 @@ export function migrateSettings(stored) {
   if (fromVersion < 3) {
     if (settings.silentMode === undefined || settings.silentMode === false) {
       settings.silentMode = true;
+    }
+    changed = true;
+  }
+
+  // v4: teto de ações por execução sobe de 25 (padrão antigo) para 60 — contas
+  // novas podem ter mais tarefas do que o teto antigo concluiria num só run.
+  if (fromVersion < 4) {
+    if (settings.maxTaskActions === undefined || settings.maxTaskActions === 25) {
+      settings.maxTaskActions = 60;
     }
     changed = true;
   }

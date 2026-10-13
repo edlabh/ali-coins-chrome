@@ -20,6 +20,7 @@ import {
   SETTINGS_VERSION,
   shouldScheduleRetry
 } from '../src/common/state-utils.js';
+import { sendCmd } from '../src/background/context.js';
 import {
   coinsFromStreak,
   streakFromCoins,
@@ -193,6 +194,7 @@ test('migrateSettings desliga keepWindowOpen legado e carimba a versão', () => 
   assert.equal(legacy.changed, true);
   assert.equal(legacy.settings.keepWindowOpen, false);
   assert.equal(legacy.settings.silentMode, true, 'v3: segundo plano por padrão');
+  assert.equal(legacy.settings.maxTaskActions, 60, 'v4: teto antigo de 25 sobe para 60');
   assert.equal(legacy.settings.settingsVersion, SETTINGS_VERSION);
   assert.equal(legacy.settings.user, 'a@b.com');
 
@@ -205,11 +207,16 @@ test('migrateSettings desliga keepWindowOpen legado e carimba a versão', () => 
   assert.equal(optedOut.changed, false);
   assert.equal(optedOut.settings.silentMode, false, 'opt-out explícito não é revertido');
 
+  const customActions = migrateSettings({ maxTaskActions: 30, settingsVersion: SETTINGS_VERSION });
+  assert.equal(customActions.changed, false);
+  assert.equal(customActions.settings.maxTaskActions, 30, 'valor explícito != 25 é preservado');
+
   // Sem config salva: defaults migrados, sem quebra.
   const fresh = migrateSettings(undefined);
   assert.equal(fresh.changed, true);
   assert.equal(fresh.settings.keepWindowOpen, false);
   assert.equal(fresh.settings.silentMode, true);
+  assert.equal(fresh.settings.maxTaskActions, 60);
 });
 
 test('shouldScheduleRetry: 1 retentativa apenas para erros, sem loop', () => {
@@ -221,6 +228,26 @@ test('shouldScheduleRetry: 1 retentativa apenas para erros, sem loop', () => {
   assert.equal(shouldScheduleRetry({ status: 'blocked', reason: 'schedule' }), false);
   assert.equal(shouldScheduleRetry({ status: 'stopped', reason: 'manual' }), false);
   assert.equal(shouldScheduleRetry({ status: 'success', reason: 'manual' }), false);
+});
+
+test('contexto: sem content script o erro é marcado para recuperação (noContentScript)', async () => {
+  const originalChrome = globalThis.chrome;
+  globalThis.chrome = {
+    tabs: {
+      sendMessage: async () => {
+        throw new Error('Could not establish connection. Receiving end does not exist.');
+      }
+    }
+  };
+  try {
+    await assert.rejects(
+      sendCmd({ runId: 'r1' }, 1, 'PING', {}, { retries: 1 }),
+      (err) => err.noContentScript === true && /PING/.test(err.message)
+    );
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -359,7 +359,7 @@ export function sleep(ms) {
  * @param {number} tabId
  * @returns {Promise<string>}
  */
-async function getTabUrl(tabId) {
+export async function getTabUrl(tabId) {
   try {
     const tab = await chrome.tabs.get(tabId);
     return tab.url || '';

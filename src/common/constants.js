@@ -111,7 +111,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
 
   // Comportamento de tarefas
   skipAppOnlyTasks: true,
-  maxTaskActions: 25,
+  // Limite configurável de ações por execução (resgates + tarefas executadas).
+  maxTaskActions: 60,
   maxAttemptsPerTask: 3,
   searchQuery: 'fone bluetooth',
   scrollSeconds: 10,

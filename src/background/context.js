@@ -84,9 +84,13 @@ export async function sendCmd(ctx, tabId, type, payload = {}, { retries = 3 } = 
       await sleep(900);
     }
   }
-  throw new Error(
+  // Marca o erro para o chamador diferenciar "aba fora do escopo do content
+  // script" (página de terceiros) de outras falhas e recuperar sem abortar.
+  const err = new Error(
     `Sem resposta do content script para ${type}: ${lastErr ? lastErr.message : 'desconhecido'}`
   );
+  err.noContentScript = true;
+  throw err;
 }
 
 /** Envia um comando à aba principal (mobile) de execução. */

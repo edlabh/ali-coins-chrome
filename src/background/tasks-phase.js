@@ -17,7 +17,13 @@ import {
 } from './context.js';
 import { commandWithCaptcha } from './gates.js';
 import { patchRunState } from './storage.js';
-import { closeOrphanTabs, ensureCoinPage, waitPossibleNavigation } from './tabs.js';
+import {
+  closeOrphanTabs,
+  ensureCoinPage,
+  getTabUrl,
+  isAliexpressUrl,
+  waitPossibleNavigation
+} from './tabs.js';
 
 /**
  * @param {object} ctx
@@ -123,13 +129,48 @@ export async function runTasksPhase(ctx) {
     await cmd(ctx, CMD.CLICK_TASK, { index: next.index, title: next.title }, { retries: 2 });
     const navigated = await waitPossibleNavigation(ctx, 3500);
 
+    // A tarefa pode abrir uma página FORA do AliExpress (webgame, loja de app,
+    // link externo): sem content script ali, o comando falharia e abortaria o
+    // run inteiro no meio das tarefas. Detecta, volta para a central e conta a
+    // tentativa sem derrubar a execução.
+    const currentUrl = navigated ? await getTabUrl(ctx.tabId) : '';
+    if (navigated && currentUrl && !isAliexpressUrl(currentUrl)) {
+      attempts[key] = (attempts[key] || 0) + 1;
+      actions += 1;
+      stats.tasks.push({ title: next.title, kind: next.kind, result: 'error' });
+      await appendLog(
+        ctx,
+        `Tarefa "${truncate(next.title, 60)}" abriu uma página externa (${truncate(currentUrl, 60)}) — retornando à central.`
+      );
+      await ensureCoinPage(ctx, true);
+      const pauseExternal = randInt(
+        settings.pauseBetweenTasksMinMs,
+        settings.pauseBetweenTasksMaxMs
+      );
+      if (pauseExternal > 1000) await sleepAbortable(pauseExternal);
+      continue;
+    }
+
     const seconds = next.scrollSeconds || settings.scrollSeconds;
-    const actionRes = await commandWithCaptcha(
-      ctx,
-      CMD.RUN_ACTION,
-      { kind: next.kind, query: settings.searchQuery, seconds, navigated },
-      'action'
-    );
+    let actionRes;
+    try {
+      actionRes = await commandWithCaptcha(
+        ctx,
+        CMD.RUN_ACTION,
+        { kind: next.kind, query: settings.searchQuery, seconds, navigated },
+        'action'
+      );
+    } catch (err) {
+      if (err && err.noContentScript) {
+        attempts[key] = (attempts[key] || 0) + 1;
+        actions += 1;
+        stats.tasks.push({ title: next.title, kind: next.kind, result: 'error' });
+        await appendLog(ctx, 'Página da tarefa fora do escopo do content script — retornando à central.');
+        await ensureCoinPage(ctx, true);
+        continue;
+      }
+      throw err;
+    }
 
     attempts[key] = (attempts[key] || 0) + 1;
     actions += 1;
@@ -155,6 +196,15 @@ export async function runTasksPhase(ctx) {
     // Pausa aleatória entre tarefas (anti-detecção), como TASK_PAUSE_* do ali-coins.
     const pause = randInt(settings.pauseBetweenTasksMinMs, settings.pauseBetweenTasksMaxMs);
     if (pause > 1000) await sleepAbortable(pause);
+  }
+
+  // Deixa explícito quando o run parou pelo teto de ações (tarefas restantes
+  // ficam para a próxima execução) — antes o encerramento era silencioso.
+  if (actions >= settings.maxTaskActions) {
+    await appendLog(
+      ctx,
+      `Limite de ações por execução atingido (${settings.maxTaskActions}); tarefas restantes ficam para o próximo run (aumente em Opções para concluir tudo numa só execução).`
+    );
   }
 
   // Varredura final de resgates pendentes.
