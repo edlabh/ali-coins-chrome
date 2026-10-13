@@ -143,19 +143,27 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
     ctx.tabId = win.tabId;
     await patchRunState({ tabId: ctx.tabId, windowId: ctx.windowId });
 
-    // 2. Autenticação
-    await updatePhase(PHASE.AUTH, 'Autenticando no AliExpress…');
-    auth = await authenticate(ctx);
+    // 2. Autenticação — SOMENTE se a sessão ainda não estiver ativa.
+    auth = await ensureAuthenticated(ctx);
     if (!auth.ok) {
       throw new Error(auth.error || 'Falha de autenticação.');
     }
 
-    // Uma sessão nova: recarrega a central de moedas para partir do estado limpo.
-    await ensureCoinPage(ctx, true);
+    // Sessão recém-criada: recarrega a central de moedas para partir do estado
+    // limpo. Quando a sessão já existia, a página atual já está pronta.
+    if (!auth.already) {
+      await ensureCoinPage(ctx, true);
+    }
 
-    // 3. Check-in
+    // 3. Check-in (com auto-cura: se a sessão caiu, autentica e tenta de novo)
     await updatePhase(PHASE.CHECKIN, 'Realizando check-in diário…');
     checkin = await commandWithCaptcha(ctx, CMD.DO_CHECKIN, {}, 'checkin');
+    if (checkin && checkin.needsLogin) {
+      const retryAuth = await ensureAuthenticated(ctx);
+      if (!retryAuth.ok) throw new Error(retryAuth.error || 'Falha de autenticação.');
+      await ensureCoinPage(ctx, true);
+      checkin = await commandWithCaptcha(ctx, CMD.DO_CHECKIN, {}, 'checkin');
+    }
     ctx.balanceBefore = toNumberOrNull(checkin.balance);
     await patchRunState({ stats: { ...stats } });
 
@@ -178,7 +186,7 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
       startedAt,
       endedAt: Date.now(),
       status,
-      auth: { ok: true },
+      auth: { ok: true, already: Boolean(auth.already) },
       checkin,
       balanceBefore: ctx.balanceBefore,
       balanceAfter,
@@ -206,7 +214,7 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
       startedAt,
       endedAt: Date.now(),
       status,
-      auth: auth ? { ok: Boolean(auth.ok) } : null,
+      auth: auth ? { ok: Boolean(auth.ok), already: Boolean(auth.already) } : null,
       checkin,
       balanceBefore: ctx.balanceBefore,
       balanceAfter: null,
@@ -266,6 +274,77 @@ function describeReport(report) {
   parts.push(`duração ${formatDuration(report.durationMs)}`);
   if (report.status !== RUN_STATUS.SUCCESS) parts.push(`status: ${report.status}`);
   return parts.join(' • ');
+}
+
+/**
+ * Verificação de cookie forte de sessão, usada como desempate quando a UI demora
+ * a decidir se está autenticada (ex.: rede lenta). O login_aliyunid_ticket só é
+ * emitido com autenticação bem-sucedida.
+ * @returns {Promise<boolean>}
+ */
+async function hasAuthCookie() {
+  try {
+    const ticket = await chrome.cookies.get({
+      url: 'https://www.aliexpress.com/',
+      name: 'login_aliyunid_ticket'
+    });
+    return Boolean(ticket && ticket.value);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Garante que a sessão está autenticada SEM tentar login desnecessário:
+ *   1. consulta o estado da página (CHECK_AUTH — somente leitura);
+ *   2. só dispara o fluxo de login quando há formulário/prompt de login visível;
+ *   3. UI indecisa por muito tempo → decide pelo cookie de sessão.
+ * @param {object} ctx
+ * @returns {Promise<{ok: boolean, already?: boolean, cookieOnly?: boolean, error?: string}>}
+ */
+async function ensureAuthenticated(ctx) {
+  await updatePhase(PHASE.AUTH, 'Verificando se a sessão do AliExpress já está ativa…');
+
+  const deadline = Date.now() + 25000;
+  while (Date.now() < deadline) {
+    if (await isStopRequestedNow()) throw new RunAbortedError();
+
+    let st;
+    try {
+      st = await cmd(ctx, CMD.CHECK_AUTH, {}, { retries: 3 });
+    } catch {
+      // Página em transição (content script ainda não pronto): aguarda e repete.
+      await sleepAbortable(1200);
+      continue;
+    }
+
+    if (st.state === 'captcha') {
+      await captchaGate(ctx, 'auth-check');
+      continue;
+    }
+    if (st.state === 'two_fa') {
+      await twoFAGate(ctx);
+      continue;
+    }
+    if (st.state === 'logged_in') {
+      await updatePhase(PHASE.AUTH, 'Sessão do AliExpress já autenticada; login dispensado.');
+      return { ok: true, already: true };
+    }
+    if (st.state === 'needs_login') {
+      break;
+    }
+    // 'pending': esqueleto do SPA ainda carregando.
+    await sleepAbortable(1800);
+  }
+
+  // UI não decidiu dentro da janela: o cookie de sessão decide.
+  if (await hasAuthCookie()) {
+    await updatePhase(PHASE.AUTH, 'Cookie de sessão presente; login dispensado.');
+    return { ok: true, already: true, cookieOnly: true };
+  }
+
+  await updatePhase(PHASE.AUTH, 'Login necessário. Autenticando no AliExpress…');
+  return await authenticate(ctx);
 }
 
 /**

@@ -36,6 +36,7 @@ export const DEVICE_PRESETS = {
 
 /** Tipos de mensagem: background -> content script (comando). */
 export const CMD = Object.freeze({
+  CHECK_AUTH: 'CHECK_AUTH',
   DO_LOGIN: 'DO_LOGIN',
   WAIT_CAPTCHA: 'WAIT_CAPTCHA',
   WAIT_2FA: 'WAIT_2FA',

@@ -24,6 +24,8 @@
           AC.state.stopRequested = true;
           return { ok: true };
 
+        case 'CHECK_AUTH':
+          return AC.actions.checkAuth();
         case 'DO_LOGIN':
           return await AC.actions.doLogin(payload);
         case 'WAIT_CAPTCHA':

@@ -217,6 +217,7 @@ test('content scripts carregam em ordem sem erros e expõem AC.actions', () => {
   assert.equal(typeof AC.classifyTask, 'function');
   assert.equal(typeof AC.dom.clickHuman, 'function');
   assert.equal(typeof AC.actions.doLogin, 'function');
+  assert.equal(typeof AC.actions.checkAuth, 'function');
   assert.equal(typeof AC.actions.doCheckin, 'function');
   assert.equal(typeof AC.actions.extractTasks, 'function');
   assert.equal(typeof AC.actions.runAction, 'function');

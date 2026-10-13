@@ -52,7 +52,8 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
 
 ```
 janela Pixel 8 → m.aliexpress.com/coin-index
-   → login (usuário → senha → [captcha: aguarda você] → [2FA: aguarda você])
+   → sessão já ativa? login é dispensado; senão:
+     login (usuário → senha → [captcha: aguarda você] → [2FA: aguarda você])
    → check-in diário (#signButton) + confirmação do marcador "today-checked"
    → tarefas "Ganhe mais moedas":
         surpresa (3 cards tocados) • busca (fone bluetooth) • scroll ≥16s (descontos)

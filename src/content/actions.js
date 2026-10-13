@@ -34,6 +34,30 @@
     return { username, password, twoFA };
   }
 
+  /**
+   * Consulta o estado de autenticação da página para decidir se um login é
+   * necessário. Nunca preenche campos — é somente leitura (espelha o
+   * shouldAttemptLogin do ali-coins: senha visível manda; sem formulário e com
+   * a central de moedas carregada, a sessão é considerada válida).
+   * @returns {{state: 'logged_in'|'needs_login'|'pending'|'captcha'|'two_fa'}}
+   */
+  function checkAuth() {
+    const form = loginFormState();
+    const captcha = captchaInfo();
+    const skeleton = Boolean(document.querySelector(S.login.loginPendingContainer));
+    const loginUrl = /login|sign-?in|passport/i.test(location.href);
+    const coin = coinUiPresent();
+
+    if (form.twoFA) return { state: 'two_fa' };
+    if (captcha.present && !coin) return { state: 'captcha', captchaKind: captcha.kind };
+    // Campo de usuário/senha visível = prompt de login (fluxo completo ou
+    // reautenticação in-page que pede só a senha na mesma URL do coin-index).
+    if (form.password || form.username) return { state: 'needs_login' };
+    if (coin) return { state: 'logged_in' };
+    if (loginUrl) return { state: skeleton ? 'pending' : 'needs_login' };
+    return { state: 'pending' };
+  }
+
   // ---------------------------------------------------------------------------
   // LOGIN
   // ---------------------------------------------------------------------------
@@ -201,6 +225,14 @@
 
   async function doCheckin() {
     if (captchaInfo().present) return { needsCaptcha: true };
+
+    // Salvaguarda: se a sessão expirou entre a verificação de auth e o check-in,
+    // devolve o controle ao runner para autenticar antes de tentar coletar.
+    const loginNow = loginFormState();
+    if ((loginNow.username || loginNow.password) && !coinUiPresent()) {
+      return { needsLogin: true };
+    }
+
     closeModals();
     await sleep(300);
 
@@ -549,6 +581,7 @@
   }
 
   AC.actions = {
+    checkAuth,
     doLogin,
     waitCaptcha,
     wait2FA,
