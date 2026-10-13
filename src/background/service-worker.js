@@ -69,7 +69,8 @@ async function handleMessage(message, sender) {
 
     case MSG.OPEN_WINDOW: {
       const settings = await getSettings();
-      const win = await prepareRunTab(settings);
+      // Ação manual: sempre abre a janela VISÍVEL, mesmo com o modo silencioso ligado.
+      const win = await prepareRunTab(settings, { forceVisible: true });
       return { ok: true, ...win };
     }
 

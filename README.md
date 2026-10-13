@@ -42,6 +42,8 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
 3. Configure, se quiser:
    - **Agendamento**: todos os dias no horário `HH:MM` (fuso do seu computador);
    - **Executar ao abrir o Chrome**;
+   - **Modo silencioso**: executa em uma **aba de fundo, sem abrir janela** — a aba
+     só vem para frente se um captcha/2FA precisar de você;
    - atraso inicial aleatório, pausas entre tarefas, máximo de ações, etc.
 4. Use **▶ Executar agora** no popup para validar o fluxo manualmente.
 5. Quando um captcha aparecer, a janela mobile é trazida para frente e uma notificação
@@ -133,6 +135,14 @@ Decisões de projeto relevantes:
   exibe um **aviso de depuração** na janela de execução enquanto ela estiver aberta
   — não cancele, é o mecanismo que aplica os cliques. Se o aviso for cancelado, a
   extensão cai sozinha no fallback com eventos sintéticos.
+- **Modo silencioso (segundo plano)**: a execução ocorre numa **aba de fundo**
+  (criada inativa na última janela em uso) — nada de janela nova na tela. Como a
+  aba não tem o tamanho físico do aparelho, a viewport do Pixel 8 é emulada via
+  CDP (`Emulation.setDeviceMetricsOverride` 412×915 + toque + foco), e o próprio
+  depurador impede o congelamento da aba em segundo plano. Limitação honesta:
+  **não existe "headless" real para extensões** — o Chrome precisa estar aberto e
+  a aba existe (oculta); se um captcha/2FA exigir sua ação, a aba é trazida para
+  frente automaticamente e volta ao fundo depois.
 - **Captcha**: a resolução é sempre manual (a extensão não tenta deslizar o desafio).
   Detecção por `#nc_1_n1z`, `.btn_slide`, containers `nocaptcha`/`baxia` e iframes.
 - **Tarefas de app** (Prize Land, minigames, quizzes, avaliações) são ignoradas por padrão,

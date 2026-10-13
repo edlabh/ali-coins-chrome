@@ -45,7 +45,7 @@ import {
   waitTabComplete
 } from './tabs.js';
 import { notify, notifyCaptcha, notifyResult, setBadge } from './notify.js';
-import { attachCdp, detachCdp } from './cdp.js';
+import { applySilentEmulation, attachCdp, detachCdp } from './cdp.js';
 
 const KEEPALIVE_MS = 20000;
 let keepAliveTimer = null;
@@ -188,7 +188,22 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
     ctx.windowId = win.windowId;
     ctx.tabId = win.tabId;
     await patchRunState({ tabId: ctx.tabId, windowId: ctx.windowId });
-    await appendLog(ctx, 'Janela mobile (Pixel 8) preparada com as regras de User-Agent.');
+    await appendLog(
+      ctx,
+      ctx.settings.silentMode
+        ? 'Modo silencioso: execução em segundo plano (nenhuma janela foi aberta).'
+        : 'Janela mobile (Pixel 8) preparada com as regras de User-Agent.'
+    );
+
+    // Snapshot das abas da janela: a limpeza de abas órfãs só fecha o que foi
+    // criado DURANTE o run — nunca abas pessoais (essencial no modo silencioso,
+    // que compartilha uma janela normal do usuário).
+    try {
+      const windowTabs = await chrome.tabs.query({ windowId: ctx.windowId });
+      ctx.knownTabIds = new Set(windowTabs.map((t) => t.id).filter(Boolean));
+    } catch {
+      ctx.knownTabIds = new Set();
+    }
 
     // Cliques reais via CDP (isTrusted): o AliExpress ignora eventos sintéticos
     // em alguns botões (ex.: o painel "Ganhe mais moedas" não abria). O aviso de
@@ -201,6 +216,25 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
         ? 'Cliques confiáveis (CDP) ativos para esta execução.'
         : 'CDP indisponível (aviso de depuração cancelado?) — usando eventos sintéticos como fallback.'
     );
+
+    // Modo silencioso: emula a viewport do aparelho na aba de fundo via CDP
+    // (o layout renderiza em 412×915 mesmo oculto numa janela desktop).
+    if (ctx.settings.silentMode) {
+      if (cdpReady) {
+        const emuOk = await applySilentEmulation(ctx.tabId, ctx.settings).catch(() => false);
+        await appendLog(
+          ctx,
+          emuOk
+            ? 'Emulação de viewport 412×915 aplicada à aba de fundo.'
+            : 'Emulação de viewport indisponível; o layout pode variar no modo silencioso.'
+        );
+      } else {
+        await appendLog(
+          ctx,
+          'Modo silencioso solicitado, mas o CDP está indisponível (aviso de depuração cancelado?) — o layout pode variar.'
+        );
+      }
+    }
 
     // 2. Autenticação — SOMENTE se a sessão ainda não estiver ativa.
     auth = await ensureAuthenticated(ctx);
@@ -344,9 +378,12 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
     // 4. Tarefas
     await updatePhase(PHASE.TASKS, 'Executando tarefas "Ganhe mais moedas"…');
     await runTasksPhase(ctx);
-    await closeOrphanTabs(ctx.windowId, ctx.tabId, ctx.ledgerTabId ? [ctx.ledgerTabId] : []).catch(
-      () => {}
-    );
+    await closeOrphanTabs(
+      ctx.windowId,
+      ctx.tabId,
+      ctx.ledgerTabId ? [ctx.ledgerTabId] : [],
+      ctx.knownTabIds
+    ).catch(() => {});
 
     // 5. Contabilidade final: extrato desktop de novo (fallback: saldo mobile).
     await updatePhase(PHASE.FINALIZING, 'Lendo extrato final…');
@@ -461,6 +498,33 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
 async function applyWindowPolicy(ctx, settings) {
   if (!ctx.windowId) return;
   if (ctx.tabId) await detachCdp(ctx.tabId).catch(() => {});
+
+  // Modo silencioso: a aba vive em uma janela normal do usuário — NUNCA fechar
+  // a janela dele; no máximo a própria aba de execução (e uma janela popup
+  // vazia, caso a aba tenha sido reaproveitada de uma abertura manual).
+  if (settings.silentMode) {
+    if (settings.keepWindowOpen) {
+      await appendLog(ctx, 'Modo silencioso: aba de execução mantida aberta (configuração).');
+    } else if (ctx.tabId) {
+      await appendLog(ctx, 'Concluído — fechando a aba de execução (modo silencioso).');
+      const tabInfo = await chrome.tabs.get(ctx.tabId).catch(() => null);
+      await chrome.tabs.remove(ctx.tabId).catch(() => {});
+      if (tabInfo) {
+        try {
+          const win = await chrome.windows.get(tabInfo.windowId);
+          if (win && win.type === 'popup') {
+            await chrome.windows.remove(win.id).catch(() => {});
+          }
+        } catch {
+          // Janela já fechada: ignora.
+        }
+      }
+    }
+    await clearDeviceRules().catch(() => {});
+    await closeLedgerTab();
+    return;
+  }
+
   if (settings.keepWindowOpen) {
     await appendLog(ctx, 'Janela mobile mantida aberta (configuração).');
     await closeLedgerTab();
@@ -648,7 +712,10 @@ async function captchaGate(ctx, origin) {
   ctx.stats.captchaEvents += 1;
   await updatePhase(PHASE.CAPTCHA, 'Aguardando você resolver o captcha na janela aberta…');
   await appendLog(ctx, 'Captcha detectado — aguardando a resolução na janela mobile.');
-  await focusWindow(ctx.windowId);
+  if (ctx.settings.silentMode) {
+    await appendLog(ctx, 'Modo silencioso: trazendo a aba de execução para frente para você resolver.');
+  }
+  await focusWindow(ctx.windowId, ctx.tabId);
   await notifyCaptcha(ctx.settings);
 
   const deadline = Date.now() + ctx.settings.captchaTimeoutMin * 60 * 1000;
@@ -681,7 +748,7 @@ async function captchaGate(ctx, origin) {
 async function twoFAGate(ctx) {
   await updatePhase(PHASE.TWO_FA, 'Digite o código de verificação 2FA na janela aberta…');
   await appendLog(ctx, 'Verificação 2FA solicitada — aguardando o código na janela mobile.');
-  await focusWindow(ctx.windowId);
+  await focusWindow(ctx.windowId, ctx.tabId);
   const deadline = Date.now() + ctx.settings.captchaTimeoutMin * 60 * 1000;
   while (Date.now() < deadline) {
     if (await isStopRequestedNow()) throw new RunAbortedError();
@@ -825,9 +892,12 @@ async function runTasksPhase(ctx) {
     await patchRunState({ stats: { ...stats } });
 
     await ensureCoinPage(ctx, false);
-    await closeOrphanTabs(ctx.windowId, ctx.tabId, ctx.ledgerTabId ? [ctx.ledgerTabId] : []).catch(
-      () => {}
-    );
+    await closeOrphanTabs(
+      ctx.windowId,
+      ctx.tabId,
+      ctx.ledgerTabId ? [ctx.ledgerTabId] : [],
+      ctx.knownTabIds
+    ).catch(() => {});
 
     // Pausa aleatória entre tarefas (anti-detecção), como TASK_PAUSE_* do ali-coins.
     const pause = randInt(settings.pauseBetweenTasksMinMs, settings.pauseBetweenTasksMaxMs);

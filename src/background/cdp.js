@@ -12,6 +12,8 @@
  * worker resolve a aba pelo `sender.tab.id` e executa aqui.
  */
 
+import { pickDevice } from '../common/constants.js';
+
 const CDP_VERSION = '1.3';
 const attachedTabs = new Set();
 
@@ -64,6 +66,40 @@ export async function detachCdp(tabId) {
     await chrome.debugger.detach({ tabId });
   } catch {
     // Não anexado/janela fechada: ignora.
+  }
+}
+
+/**
+ * Modo silencioso: aplica a emulação de viewport do aparelho (Pixel 8) na aba
+ * de fundo via CDP — o layout renderiza em 412×915 mesmo com a aba oculta em
+ * uma janela desktop, e o toque é habilitado. Também emula o foco para que a
+ * página não se comporte como "não visível". Efeitos são revertidos ao
+ * desanexar o depurador.
+ * @param {number} tabId
+ * @param {object} settings
+ * @returns {Promise<boolean>}
+ */
+export async function applySilentEmulation(tabId, settings) {
+  const attached = await attachCdp(tabId);
+  if (!attached) return false;
+
+  const device = pickDevice(settings);
+  const send = (method, params) => chrome.debugger.sendCommand({ tabId }, method, params);
+
+  try {
+    await send('Emulation.setDeviceMetricsOverride', {
+      width: device.width,
+      height: device.height,
+      deviceScaleFactor: device.scaleFactor || 2.625,
+      mobile: true,
+      screenWidth: device.width,
+      screenHeight: device.height
+    });
+    await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+    await send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    return true;
+  } catch {
+    return false;
   }
 }
 

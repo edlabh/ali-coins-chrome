@@ -51,15 +51,18 @@ function dnrCondition(tabId) {
 }
 
 /**
- * Garante que temos uma janela/aba de execução válida e focada.
+ * Garante que temos uma janela/aba de execução válida.
+ *  - modo normal: janela popup visível dimensionada como o aparelho;
+ *  - modo silencioso (`silentMode`): ABA DE FUNDO na última janela em uso,
+ *    sem abrir nada — a emulação de viewport é aplicada por CDP (cdp.js).
  * Reutiliza a aba existente quando ela ainda aponta para o AliExpress (ou está
- * em branco, aguardando a primeira navegação). A janela é criada em about:blank
- * de propósito: assim é possível aplicar as regras de User-Agent ANTES de
- * qualquer requisição ao AliExpress (antes, o primeiro load saía como desktop).
+ * em branco, aguardando a primeira navegação).
  * @param {object} settings
+ * @param {{forceVisible?: boolean}} [options]
  * @returns {Promise<{windowId: number, tabId: number, reused: boolean}>}
  */
-export async function ensureRunWindow(settings) {
+export async function ensureRunWindow(settings, { forceVisible = false } = {}) {
+  const silent = Boolean(settings.silentMode) && !forceVisible;
   const runtimeRef = await getRuntimeTab();
 
   if (runtimeRef) {
@@ -67,12 +70,21 @@ export async function ensureRunWindow(settings) {
       const tab = await chrome.tabs.get(runtimeRef.tabId);
       const url = (tab && tab.url) || '';
       if (tab && tab.windowId && (isAliexpressUrl(url) || isBlankUrl(url))) {
-        await chrome.windows.update(tab.windowId, { focused: true });
+        if (!silent) {
+          await chrome.windows.update(tab.windowId, { focused: true });
+        }
         return { windowId: tab.windowId, tabId: tab.id, reused: true };
       }
     } catch {
       // Aba sumiu: recria abaixo.
     }
+  }
+
+  if (silent) {
+    const windowId = await findAnchorWindow();
+    const tab = await chrome.tabs.create({ windowId, url: 'about:blank', active: false });
+    await setRuntimeTab({ windowId, tabId: tab.id });
+    return { windowId, tabId: tab.id, reused: false };
   }
 
   const device = pickDevice(settings);
@@ -94,18 +106,41 @@ export async function ensureRunWindow(settings) {
 }
 
 /**
+ * Janela-âncora para o modo silencioso: a última janela em foco; se não houver,
+ * a primeira normal; em último caso, cria uma janela minimizada (invisível).
+ * @returns {Promise<number>}
+ */
+async function findAnchorWindow() {
+  try {
+    const win = await chrome.windows.getLastFocused({ populate: false });
+    if (win && typeof win.id === 'number') return win.id;
+  } catch {
+    // segue
+  }
+  try {
+    const wins = await chrome.windows.getAll({ windowTypes: ['normal'] });
+    if (wins.length > 0 && typeof wins[0].id === 'number') return wins[0].id;
+  } catch {
+    // segue
+  }
+  const created = await chrome.windows.create({ url: 'about:blank', state: 'minimized' });
+  return created.id;
+}
+
+/**
  * Prepara a aba de execução na ordem correta:
- *   1. garante a janela popup (Pixel 8);
+ *   1. garante a janela popup (Pixel 8) ou a aba de fundo (modo silencioso);
  *   2. aplica as regras de User-Agent/Client Hints mobile na aba;
  *   3. navega (ou recarrega) SEMPRE para a central de moedas com o hash
  *      `#ac_run=1`, que o content script usa para marcar a aba e é removido logo
  *      depois. Recarregar mesmo em abas já abertas garante que uma página antiga
  *      carregada em desktop seja substituída pela variante mobile.
  * @param {object} settings
+ * @param {{forceVisible?: boolean}} [options]
  * @returns {Promise<{windowId: number, tabId: number, reused: boolean}>}
  */
-export async function prepareRunTab(settings) {
-  const win = await ensureRunWindow(settings);
+export async function prepareRunTab(settings, options = {}) {
+  const win = await ensureRunWindow(settings, options);
   await applyDeviceRules(win.tabId, settings);
   await navigateTab(win.tabId, `${COIN_URL}#ac_run=1`, 45000);
   return win;
@@ -209,20 +244,23 @@ export async function waitTabComplete(tabId, timeoutMs = 45000) {
 
 /**
  * Fecha abas órfãs (popups/novas abas abertas por cliques de tarefas),
- * espelhando closeOrphanPages do ali-coins. A aba do extrato pode ser
- * preservada via `extraKeep`.
+ * espelhando closeOrphanPages do ali-coins.
  * @param {number} windowId
  * @param {number} keepTabId
- * @param {number[]} [extraKeep]
+ * @param {number[]} [extraKeep] abas adicionais a preservar (ex.: extrato)
+ * @param {Set<number>|null} [known] snapshot das abas existentes no início do run —
+ *   quando informado, SOMENTE abas criadas durante o run são fechadas; as abas
+ *   pessoais do usuário nunca são tocadas (essencial no modo silencioso, em que
+ *   a execução compartilha uma janela normal).
  */
-export async function closeOrphanTabs(windowId, keepTabId, extraKeep = []) {
+export async function closeOrphanTabs(windowId, keepTabId, extraKeep = [], known = null) {
   const keep = new Set([keepTabId, ...extraKeep.filter(Boolean)]);
   try {
     const tabs = await chrome.tabs.query({ windowId });
     for (const tab of tabs) {
-      if (tab.id && !keep.has(tab.id)) {
-        await chrome.tabs.remove(tab.id).catch(() => {});
-      }
+      if (!tab.id || keep.has(tab.id)) continue;
+      if (known && known.has(tab.id)) continue;
+      await chrome.tabs.remove(tab.id).catch(() => {});
     }
   } catch {
     // Janela pode ter sido fechada pelo usuário: ignora.
@@ -270,14 +308,24 @@ export async function closeLedgerTab() {
 }
 
 /**
- * Traz a janela de execução para frente (usada no fluxo de captcha).
+ * Traz a janela de execução para frente e, quando informado, ativa a aba do run
+ * (necessário no modo silencioso: a aba de fundo precisa ficar visível para o
+ * usuário resolver captcha/2FA).
  * @param {number} windowId
+ * @param {number} [tabId]
  */
-export async function focusWindow(windowId) {
+export async function focusWindow(windowId, tabId = null) {
   try {
-    await chrome.windows.update(windowId, { focused: true, drawAttention: true });
+    await chrome.windows.update(windowId, { focused: true, drawAttention: true, state: 'normal' });
   } catch {
     // Ignora janela fechada.
+  }
+  if (tabId) {
+    try {
+      await chrome.tabs.update(tabId, { active: true });
+    } catch {
+      // Ignora aba fechada.
+    }
   }
 }
 

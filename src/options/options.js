@@ -170,6 +170,7 @@ async function load() {
   $('customFields').classList.toggle('hidden', $('device').value !== 'custom');
 
   $('keepWindowOpen').checked = s.keepWindowOpen !== false;
+  $('silentMode').checked = Boolean(s.silentMode);
   $('notifications').checked = s.notifications !== false;
 }
 
@@ -209,6 +210,7 @@ async function save() {
     customWidth: toInt($('customWidth').value, 412),
     customHeight: toInt($('customHeight').value, 915),
     keepWindowOpen: $('keepWindowOpen').checked,
+    silentMode: $('silentMode').checked,
     notifications: $('notifications').checked
   };
 
