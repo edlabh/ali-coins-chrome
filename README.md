@@ -33,8 +33,12 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
 ## Uso
 
 1. Clique no ícone da extensão → **Opções**.
-2. Preencha **usuário** (e-mail ou telefone) e **senha** do AliExpress e salve.
-   A senha é cifrada (AES-256-GCM, chave não exportável) antes de ser gravada.
+2. **Credenciais (opcionais)**: a extensão funciona com a **sessão já logada** do
+   perfil do Chrome. Se quiser login automático quando a sessão expirar, preencha
+   **usuário** (e-mail ou telefone) e **senha** e salve — a senha é cifrada
+   (AES-256-GCM, chave não exportável) antes de ser gravada. Sem credenciais
+   salvas, a extensão executa normalmente; se o AliExpress pedir login, você recebe
+   uma **notificação pedindo para configurá-las nas Opções**.
 3. Configure, se quiser:
    - **Agendamento**: todos os dias no horário `HH:MM` (fuso do seu computador);
    - **Executar ao abrir o Chrome**;

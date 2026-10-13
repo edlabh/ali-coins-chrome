@@ -118,10 +118,12 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
   }
 
   const settings = await getSettings();
-  if (!settings.user) {
-    await notifyResult(settings, false, 'Configure usuário e senha na página de opções da extensão.');
-    return { started: false };
-  }
+  // Sem credenciais salvas também é permitido: o AliExpress pode já estar
+  // logado no perfil. O login só é exigido quando a página pedir (ver
+  // ensureAuthenticated), com um aviso claro pedindo para configurar as Opções.
+  const credentialsConfigured = Boolean(
+    settings.user && (settings.passwordEnc || settings.passwordPlain)
+  );
 
   const runId = crypto.randomUUID();
   const startedAt = Date.now();
@@ -155,6 +157,12 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
   };
 
   await appendLog(ctx, `Execução iniciada (${reasonLabel(reason)}).`);
+  if (!credentialsConfigured) {
+    await appendLog(
+      ctx,
+      'Sem credenciais salvas — executando com a sessão existente do AliExpress (o login será solicitado apenas se a sessão estiver inválida).'
+    );
+  }
 
   let status = RUN_STATUS.SUCCESS;
   let checkin = null;
@@ -572,22 +580,36 @@ async function ensureAuthenticated(ctx) {
     return { ok: true, already: true, cookieOnly: true };
   }
 
+  // Login realmente necessário: sem credenciais não há como prosseguir. Avisa
+  // o usuário (notificação + log) e encerra o run com mensagem acionável.
+  const password = await getPassword(ctx.settings);
+  if (!ctx.settings.user || !password) {
+    const message =
+      'O AliExpress não está logado e não há usuário/senha configurados. Abra as Opções da extensão e informe as credenciais para o login automático.';
+    await appendLog(ctx, `⚠ Login necessário: ${message}`);
+    await notify(ctx.settings, {
+      id: 'ali-coins-missing-credentials',
+      title: 'Ali Coins: login necessário',
+      message,
+      requireInteraction: true
+    });
+    return { ok: false, missingCredentials: true, error: message };
+  }
+
   await updatePhase(PHASE.AUTH, 'Login necessário. Autenticando no AliExpress…');
   await appendLog(ctx, 'Login necessário — autenticando com as credenciais salvas.');
-  const result = await authenticate(ctx);
+  const result = await authenticate(ctx, password);
   if (result.ok) await appendLog(ctx, 'Login concluído com sucesso.');
   return result;
 }
 
 /**
  * Executa o plano de autenticação: DO_LOGIN em loop, tratando captcha/2FA.
+ * A senha é decifrada uma única vez pelo chamador (ensureAuthenticated).
+ * @param {object} ctx
+ * @param {string} password
  */
-async function authenticate(ctx) {
-  const password = await getPassword(ctx.settings);
-  if (!password) {
-    return { ok: false, error: 'Senha não configurada.' };
-  }
-
+async function authenticate(ctx, password) {
   for (let attempt = 1; attempt <= 6; attempt += 1) {
     if (await isStopRequestedNow()) throw new RunAbortedError();
     const res = await cmd(ctx, CMD.DO_LOGIN, {
