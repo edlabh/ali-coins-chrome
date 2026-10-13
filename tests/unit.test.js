@@ -156,22 +156,28 @@ test('buildReport calcula ganho de saldo e duração', () => {
 });
 
 test('migrateSettings desliga keepWindowOpen legado e carimba a versão', () => {
-  // Config antiga (padrão antigo mantinha a janela aberta) → migra para fechar.
+  // Config antiga (padrões antigos: janela aberta, execução visível) → migra.
   const legacy = migrateSettings({ keepWindowOpen: true, user: 'a@b.com' });
   assert.equal(legacy.changed, true);
   assert.equal(legacy.settings.keepWindowOpen, false);
+  assert.equal(legacy.settings.silentMode, true, 'v3: segundo plano por padrão');
   assert.equal(legacy.settings.settingsVersion, SETTINGS_VERSION);
   assert.equal(legacy.settings.user, 'a@b.com');
 
-  // Config já na versão atual: preferência do usuário é preservada.
+  // Config já na versão atual: preferências do usuário são preservadas.
   const current = migrateSettings({ keepWindowOpen: true, settingsVersion: SETTINGS_VERSION });
   assert.equal(current.changed, false);
   assert.equal(current.settings.keepWindowOpen, true);
+
+  const optedOut = migrateSettings({ silentMode: false, settingsVersion: SETTINGS_VERSION });
+  assert.equal(optedOut.changed, false);
+  assert.equal(optedOut.settings.silentMode, false, 'opt-out explícito não é revertido');
 
   // Sem config salva: defaults migrados, sem quebra.
   const fresh = migrateSettings(undefined);
   assert.equal(fresh.changed, true);
   assert.equal(fresh.settings.keepWindowOpen, false);
+  assert.equal(fresh.settings.silentMode, true);
 });
 
 // ---------------------------------------------------------------------------

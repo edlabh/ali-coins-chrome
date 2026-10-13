@@ -42,8 +42,9 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
 3. Configure, se quiser:
    - **Agendamento**: todos os dias no horário `HH:MM` (fuso do seu computador);
    - **Executar ao abrir o Chrome**;
-   - **Modo silencioso**: executa em uma **aba de fundo, sem abrir janela** — a aba
-     só vem para frente se um captcha/2FA precisar de você;
+   - **Modo silencioso** (**padrão**): executa em uma **aba de fundo, sem abrir
+     janela** — a aba só vem para frente se um captcha/2FA precisar de você;
+     desmarque para acompanhar a execução numa janela visível;
    - atraso inicial aleatório, pausas entre tarefas, máximo de ações, etc.
 4. Use **▶ Executar agora** no popup para validar o fluxo manualmente.
 5. Quando um captcha aparecer, a janela mobile é trazida para frente e uma notificação
@@ -140,7 +141,7 @@ Decisões de projeto relevantes:
   exibe um **aviso de depuração** na janela de execução enquanto ela estiver aberta
   — não cancele, é o mecanismo que aplica os cliques. Se o aviso for cancelado, a
   extensão cai sozinha no fallback com eventos sintéticos.
-- **Modo silencioso (segundo plano)**: a execução ocorre numa **aba de fundo**
+- **Modo silencioso (segundo plano, padrão)**: a execução ocorre numa **aba de fundo**
   (criada inativa na última janela em uso) — nada de janela nova na tela. Como a
   aba não tem o tamanho físico do aparelho, a viewport do Pixel 8 é emulada via
   CDP (`Emulation.setDeviceMetricsOverride` 412×915 + toque + foco), e o próprio

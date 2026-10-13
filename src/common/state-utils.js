@@ -78,10 +78,11 @@ export function summarizeTasks(tasks) {
 
 /**
  * Versão do schema de configurações salvas.
- * v2: a janela mobile passa a ser fechada ao concluir (antes ficava aberta)
- *     e o run passa a gravar o extrato/log de execução.
+ * v2: a janela mobile passa a ser fechada ao concluir (antes ficava aberta).
+ * v3: execução em segundo plano por padrão (a aba só aparece para captcha/2FA);
+ *     o run passa a gravar o extrato/log (v2 já incluía).
  */
-export const SETTINGS_VERSION = 2;
+export const SETTINGS_VERSION = 3;
 
 /**
  * Migra configurações salvas por versões anteriores.
@@ -91,13 +92,27 @@ export const SETTINGS_VERSION = 2;
 export function migrateSettings(stored) {
   const settings = { ...(stored || {}) };
   let changed = false;
+  const fromVersion = Number.isFinite(settings.settingsVersion) ? settings.settingsVersion : 0;
 
-  if (!Number.isFinite(settings.settingsVersion) || settings.settingsVersion < SETTINGS_VERSION) {
-    // O valor `true` vinha do antigo padrão; como o novo comportamento pedido é
-    // fechar a janela ao concluir, migramos apenas quando era o padrão antigo.
+  // v2: fechar a janela mobile ao concluir (o valor `true` era o antigo padrão).
+  if (fromVersion < 2) {
     if (settings.keepWindowOpen === undefined || settings.keepWindowOpen === true) {
       settings.keepWindowOpen = false;
     }
+    changed = true;
+  }
+
+  // v3: segundo plano por padrão. O `false` armazenado era o antigo padrão —
+  // quem quiser acompanhar a execução desmarca nas Opções depois (o valor
+  // explícito daí em diante é preservado, pois a versão passa a ser 3).
+  if (fromVersion < 3) {
+    if (settings.silentMode === undefined || settings.silentMode === false) {
+      settings.silentMode = true;
+    }
+    changed = true;
+  }
+
+  if (changed || fromVersion !== SETTINGS_VERSION) {
     settings.settingsVersion = SETTINGS_VERSION;
     changed = true;
   }

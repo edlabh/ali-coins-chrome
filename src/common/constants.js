@@ -124,7 +124,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   customWidth: 412,
   customHeight: 915,
   keepWindowOpen: false, // por padrão a janela mobile é FECHADA ao concluir (configurável)
-  silentMode: false, // execução em segundo plano: aba de fundo, sem abrir janela (captcha traz para frente)
+  // PADRÃO: execução em segundo plano (aba de fundo, nada abre na tela). A aba
+  // só é trazida para frente quando um captcha/2FA precisar do usuário.
+  // Desmarque nas Opções para acompanhar a execução numa janela visível.
+  silentMode: true,
   notifications: true
 });
 
