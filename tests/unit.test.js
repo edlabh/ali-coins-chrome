@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import path from 'node:path';
 
-import { computeNextRunAt, parseTimeOfDay, formatDuration, randInt } from '../src/common/schedule.js';
+import { computeNextRunAt, parseTimeOfDay, formatDuration, randInt, shouldCatchUp } from '../src/common/schedule.js';
 import { statusLabel, coinsSourceLabel, fmtNumber } from '../src/common/format.js';
 import {
   pickNextTask,
@@ -17,7 +17,8 @@ import {
   buildReport,
   summarizeTasks,
   migrateSettings,
-  SETTINGS_VERSION
+  SETTINGS_VERSION,
+  shouldScheduleRetry
 } from '../src/common/state-utils.js';
 import {
   coinsFromStreak,
@@ -79,6 +80,18 @@ test('formatDuration e randInt funcionam como esperado', () => {
     const v = randInt(5, 10);
     assert.ok(v >= 5 && v <= 10);
   }
+});
+
+test('shouldCatchUp: recupera a agenda perdida com o Chrome fechado', () => {
+  const now = Date.now();
+  assert.equal(shouldCatchUp({ scheduleEnabled: true, missedAt: now - 60000, now }), true);
+  assert.equal(shouldCatchUp({ scheduleEnabled: true, missedAt: now + 60000, now }), false);
+  assert.equal(shouldCatchUp({ scheduleEnabled: false, missedAt: now - 60000, now }), false);
+  assert.equal(
+    shouldCatchUp({ scheduleEnabled: true, catchUpMissed: false, missedAt: now - 60000, now }),
+    false
+  );
+  assert.equal(shouldCatchUp({ scheduleEnabled: true, missedAt: null, now }), false);
 });
 
 test('format: rótulos compartilhados (status, fonte do check-in, número)', () => {
@@ -197,6 +210,17 @@ test('migrateSettings desliga keepWindowOpen legado e carimba a versão', () => 
   assert.equal(fresh.changed, true);
   assert.equal(fresh.settings.keepWindowOpen, false);
   assert.equal(fresh.settings.silentMode, true);
+});
+
+test('shouldScheduleRetry: 1 retentativa apenas para erros, sem loop', () => {
+  assert.equal(shouldScheduleRetry({ status: 'error', reason: 'manual' }), true);
+  assert.equal(shouldScheduleRetry({ status: 'error', reason: 'schedule' }), true);
+  assert.equal(shouldScheduleRetry({ status: 'error', reason: 'catchup' }), true);
+  assert.equal(shouldScheduleRetry({ status: 'error', reason: 'retry' }), false);
+  assert.equal(shouldScheduleRetry({ status: 'error', retryOnFailure: false }), false);
+  assert.equal(shouldScheduleRetry({ status: 'blocked', reason: 'schedule' }), false);
+  assert.equal(shouldScheduleRetry({ status: 'stopped', reason: 'manual' }), false);
+  assert.equal(shouldScheduleRetry({ status: 'success', reason: 'manual' }), false);
 });
 
 // ---------------------------------------------------------------------------

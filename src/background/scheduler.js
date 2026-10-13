@@ -1,11 +1,12 @@
 /**
- * Agendamento: alarme diário + execução na abertura do Chrome.
+ * Agendamento: alarme diário + execução na abertura do Chrome + catch-up.
  */
 
-import { computeNextRunAt } from '../common/schedule.js';
-import { getSettings, patchRuntime } from './storage.js';
+import { computeNextRunAt, shouldCatchUp } from '../common/schedule.js';
+import { getSettings, getRuntime, patchRuntime } from './storage.js';
 import { startRun } from './runner.js';
 import { setBadge } from './notify.js';
+import { RETRY_ALARM, clearRetry } from './retry.js';
 
 const ALARM_DAILY = 'ali-coins-daily';
 
@@ -48,6 +49,14 @@ async function rescheduleAfterFire() {
  */
 export function installScheduler() {
   chrome.alarms.onAlarm.addListener(async (alarm) => {
+    // Retentativa de uma execução que falhou.
+    if (alarm.name === RETRY_ALARM) {
+      await clearRetry();
+      await setBadge('…', 'idle');
+      await startRun({ reason: 'retry', manual: false });
+      return;
+    }
+
     if (alarm.name !== ALARM_DAILY) return;
     await rescheduleAfterFire();
     const s = await getSettings();
@@ -58,8 +67,26 @@ export function installScheduler() {
 
   chrome.runtime.onStartup.addListener(async () => {
     const s = await getSettings();
+    const runtime = await getRuntime();
+    const missedAt = Number.isFinite(runtime.nextRunAt) ? runtime.nextRunAt : null;
+
     // Reagenda o alarme diário (alarms sobrevivem a reinícios, mas recriamos por segurança).
     await scheduleDaily(s);
+
+    // Catch-up: o horário agendado passou enquanto o Chrome estava fechado.
+    if (
+      shouldCatchUp({
+        scheduleEnabled: s.scheduleEnabled,
+        catchUpMissed: s.catchUpMissed,
+        missedAt,
+        now: Date.now()
+      })
+    ) {
+      await setBadge('…', 'idle');
+      await startRun({ reason: 'catchup', manual: false });
+      return; // evita execução duplicada neste boot com o runOnStartup
+    }
+
     if (s.runOnStartup) {
       await setBadge('…', 'idle');
       await startRun({ reason: 'startup', manual: false });

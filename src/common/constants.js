@@ -101,6 +101,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   scheduleEnabled: false,
   scheduleTime: '09:30', // HH:MM local do navegador
   runOnStartup: false,
+  // Se o Chrome estava fechado no horário agendado, executar na próxima abertura.
+  catchUpMissed: true,
 
   // Ritmo / anti-detecção
   startDelayMaxMin: 15,
@@ -113,6 +115,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   maxAttemptsPerTask: 3,
   searchQuery: 'fone bluetooth',
   scrollSeconds: 10,
+  // Falha na execução agenda UMA nova tentativa automática (~45 min depois).
+  retryOnFailure: true,
 
   // Captcha
   captchaTimeoutMin: 5,

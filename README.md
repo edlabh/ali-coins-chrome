@@ -42,6 +42,9 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
 3. Configure, se quiser:
    - **Agendamento**: todos os dias no horário `HH:MM` (fuso do seu computador);
    - **Executar ao abrir o Chrome**;
+   - **Catch-up de agenda** (padrão): se o Chrome estava fechado no horário agendado,
+     a execução acontece na próxima abertura;
+   - **Retentativa automática** (padrão): uma falha agenda **1 nova tentativa** em ~45 min;
    - **Modo silencioso** (**padrão**): executa em uma **aba de fundo, sem abrir
      janela** — a aba só vem para frente se um captcha/2FA precisar de você;
      desmarque para acompanhar a execução numa janela visível;
@@ -160,8 +163,8 @@ Decisões de projeto relevantes:
 
 - Credenciais ficam **apenas** em `chrome.storage.local` do seu perfil; a senha é cifrada
   com AES-256-GCM usando uma chave gerada localmente e **não exportável** (IndexedDB da
-  extensão). Fallback em texto puro só ocorre se o navegador não oferecer WebCrypto —
-  nesse caso a UI avisa.
+  extensão). O salvamento **exige** a criptografia: sem WebCrypto a gravação é recusada —
+  nenhuma senha é gravada em texto puro.
 - Nenhuma telemetria, nenhum servidor remoto. O único tráfego é para o AliExpress.
 - Recomendações: perfil dedicado do Chrome para automação; não sincronizar esse perfil;
   revisar as permissões antes de instalar.
@@ -173,6 +176,9 @@ npm test        # testes unitários (node --test) da lógica pura
 npm run check   # checagem de sintaxe de todos os scripts
 npm run icons   # regera os ícones (tools/make-icons.py)
 ```
+
+O **CI** (GitHub Actions — `.github/workflows/ci.yml`) roda `npm run check` e `npm test`
+em cada push/PR; como não há dependências, não é preciso instalar nada.
 
 ## Limitações conhecidas
 

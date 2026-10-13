@@ -29,7 +29,9 @@ export async function getSettings() {
 }
 
 /**
- * Salva um patch de configurações. O campo `password` (texto puro) é cifrado e removido.
+ * Salva um patch de configurações. O campo `password` (texto puro) é cifrado e
+ * removido. A criptografia é OBRIGATÓRIA: se ela falhar, o salvamento é recusado
+ * (nunca gravamos senha em texto puro).
  * @param {object} patch
  * @returns {Promise<object>} settings atualizadas
  */
@@ -39,15 +41,14 @@ export async function saveSettings(patch) {
 
   if (typeof patch.password === 'string' && patch.password.length > 0) {
     const enc = await encryptText(patch.password);
-    if (enc) {
-      next.passwordEnc = enc;
-      next.passwordPlain = '';
-      next.cryptoOk = true;
-    } else {
-      next.passwordEnc = null;
-      next.passwordPlain = patch.password;
-      next.cryptoOk = false;
+    if (!enc) {
+      throw new Error(
+        'Não foi possível cifrar a senha (WebCrypto/IndexedDB indisponível). Salvamento recusado para não gravar credenciais em texto puro.'
+      );
     }
+    next.passwordEnc = enc;
+    next.passwordPlain = '';
+    next.cryptoOk = true;
   }
   delete next.password;
   next.settingsVersion = SETTINGS_VERSION;
@@ -58,6 +59,8 @@ export async function saveSettings(patch) {
 
 /**
  * Recupera a senha em texto puro (apenas em memória do SW, nunca logada).
+ * `passwordPlain` só é lido como compatibilidade legada (estado que não existe
+ * mais em novos salvamentos, que exigem cifragem); a UI orienta a recadastrar.
  * @param {object} [settings]
  * @returns {Promise<string>}
  */

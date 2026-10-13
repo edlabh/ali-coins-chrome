@@ -28,7 +28,8 @@
       <p id="passwordState" class="muted small"></p>
       <p class="muted small">
         A senha é cifrada (AES-256-GCM) com uma chave não exportável guardada na extensão antes de ser salva.
-        Recomenda-se usar um perfil dedicado do Chrome para automação.
+        O salvamento <strong>exige criptografia</strong>: se o WebCrypto não estiver disponível, a gravação é
+        recusada — nunca gravamos senha em texto puro. Recomenda-se um perfil dedicado do Chrome para automação.
       </p>
     </section>
 
@@ -42,6 +43,14 @@
       <label class="row">
         <input id="runOnStartup" type="checkbox" />
         <span>Executar ao abrir o Chrome</span>
+      </label>
+      <label class="row">
+        <input id="catchUpMissed" type="checkbox" />
+        <span>Se o Chrome estiver fechado no horário agendado, executar na próxima abertura</span>
+      </label>
+      <label class="row">
+        <input id="retryOnFailure" type="checkbox" />
+        <span>Tentar novamente em ~45 min se a execução falhar (1 retentativa)</span>
       </label>
       <label class="row">
         <span>Atraso inicial aleatório (min):</span>

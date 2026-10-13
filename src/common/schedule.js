@@ -62,3 +62,21 @@ export function randInt(min, max) {
   const hi = Math.max(min, max);
   return lo + Math.floor(Math.random() * (hi - lo + 1));
 }
+
+/**
+ * Catch-up da agenda: indica se o horário agendado passou com o Chrome fechado
+ * (portanto a execução deve acontecer na próxima abertura do navegador).
+ * @param {{scheduleEnabled?: boolean, catchUpMissed?: boolean, missedAt?: (number|null), now?: number}} params
+ * @returns {boolean}
+ */
+export function shouldCatchUp({
+  scheduleEnabled = false,
+  catchUpMissed = true,
+  missedAt = null,
+  now = Date.now()
+} = {}) {
+  if (!scheduleEnabled) return false;
+  if (catchUpMissed === false) return false;
+  if (!Number.isFinite(missedAt)) return false;
+  return now > missedAt;
+}

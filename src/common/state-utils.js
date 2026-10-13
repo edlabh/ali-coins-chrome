@@ -121,6 +121,20 @@ export function migrateSettings(stored) {
 }
 
 /**
+ * Decide se uma retentativa automática deve ser agendada após uma falha.
+ * Apenas para erros (nunca bloqueio/parada/sucesso) e nunca a partir de uma
+ * retentativa — garante no máximo 1 nova tentativa por falha, sem loop.
+ * @param {{status?: string, reason?: string, retryOnFailure?: boolean}} params
+ * @returns {boolean}
+ */
+export function shouldScheduleRetry({ status, reason, retryOnFailure = true } = {}) {
+  if (retryOnFailure === false) return false;
+  if (status !== 'error') return false;
+  if (reason === 'retry') return false;
+  return true;
+}
+
+/**
  * Verifica se um cancelamento foi pedido no run state.
  * @param {{stopRequested?: boolean} | null | undefined} runState
  */

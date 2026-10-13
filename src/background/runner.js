@@ -14,6 +14,7 @@ import { formatDuration, randInt } from '../common/schedule.js';
 import {
   buildReport,
   pickNextTask,
+  shouldScheduleRetry,
   summarizeTasks,
   taskKey
 } from '../common/state-utils.js';
@@ -48,6 +49,7 @@ import {
 import { notify, notifyCaptcha, notifyResult, setBadge } from './notify.js';
 import { applySilentEmulation, attachCdp, detachCdp } from './cdp.js';
 import { coinsSourceLabel } from '../common/format.js';
+import { clearRetry, scheduleRetry } from './retry.js';
 
 const KEEPALIVE_MS = 20000;
 // Um run sem NENHUMA atualização de estado por este tempo é considerado órfão
@@ -102,6 +104,8 @@ async function appendLog(ctx, message) {
 
 function reasonLabel(reason) {
   if (reason === 'schedule') return 'agendamento diário';
+  if (reason === 'catchup') return 'recuperação de agenda (Chrome estava fechado)';
+  if (reason === 'retry') return 'nova tentativa automática';
   if (reason === 'startup') return 'abertura do Chrome';
   return 'execução manual';
 }
@@ -143,6 +147,9 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
   const credentialsConfigured = Boolean(
     settings.user && (settings.passwordEnc || settings.passwordPlain)
   );
+
+  // Uma nova execução supersede uma retentativa automática pendente.
+  await clearRetry();
 
   const runId = crypto.randomUUID();
   const startedAt = Date.now();
@@ -529,6 +536,16 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
       log: ctx.log
     });
     await finalize(report, settings, false);
+
+    // Falha (não bloqueio/parada): agenda UMA retentativa automática. O motivo
+    // 'retry' nunca retenta de novo — evita loop.
+    if (shouldScheduleRetry({ status, reason, retryOnFailure: settings.retryOnFailure })) {
+      await scheduleRetry().catch(() => {});
+      await appendLog(
+        ctx,
+        'Falha na execução — nova tentativa automática agendada para daqui a ~45 min.'
+      );
+    }
     return { started: true };
   } finally {
     stopKeepAlive();

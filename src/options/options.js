@@ -118,12 +118,14 @@ async function load() {
   $('passwordState').textContent = s.passwordEnc
     ? 'Senha configurada (cifrada).'
     : s.passwordPlain
-      ? 'Senha configurada em texto puro (criptografia indisponível neste navegador).'
+      ? '⚠ Senha legada em texto puro — informe a senha novamente e salve para cifrá-la.'
       : 'Nenhuma senha configurada.';
 
   $('scheduleEnabled').checked = Boolean(s.scheduleEnabled);
   $('scheduleTime').value = s.scheduleTime || '09:30';
   $('runOnStartup').checked = Boolean(s.runOnStartup);
+  $('catchUpMissed').checked = s.catchUpMissed !== false;
+  $('retryOnFailure').checked = s.retryOnFailure !== false;
   $('startDelayMaxMin').value = s.startDelayMaxMin ?? 15;
 
   $('skipAppOnlyTasks').checked = s.skipAppOnlyTasks !== false;
@@ -167,6 +169,8 @@ async function save() {
     scheduleEnabled: $('scheduleEnabled').checked,
     scheduleTime: $('scheduleTime').value || '09:30',
     runOnStartup: $('runOnStartup').checked,
+    catchUpMissed: $('catchUpMissed').checked,
+    retryOnFailure: $('retryOnFailure').checked,
     startDelayMaxMin: toInt($('startDelayMaxMin').value, 15),
 
     skipAppOnlyTasks: $('skipAppOnlyTasks').checked,
@@ -193,13 +197,15 @@ async function save() {
   const password = $('password').value;
   if (password) patch.password = password;
 
-  await saveSettings(patch);
+  try {
+    await saveSettings(patch);
+  } catch (err) {
+    setStatus(`Falha ao salvar: ${err.message}`, 'error');
+    return;
+  }
   $('password').value = '';
   if (password) {
-    const after = await getSettings();
-    $('passwordState').textContent = after.passwordEnc
-      ? 'Senha configurada (cifrada).'
-      : 'Senha configurada em texto puro (criptografia indisponível neste navegador).';
+    $('passwordState').textContent = 'Senha configurada (cifrada).';
   }
 
   // Reagenda o alarme diário no service worker.
