@@ -312,13 +312,22 @@ const TASKS_HTML = `
       <button class="e2e_normal_task_right_btn" style="opacity: 0.5">GO</button>
     </div>
   </div>
+  <div class="e2e_normal_task">
+    <div class="e2e_normal_task_content_title">Pesquise produtos</div>
+    <div class="e2e_normal_task_content_secondTitle"></div>
+    <div class="e2e_normal_task_right"><button class="e2e_normal_task_right_btn">Iniciar agora</button></div>
+  </div>
 `;
 
-test('AÇÕES: extractTasks classifica cards do painel (GO/COLLECT/rodadas/kind)', () => {
+test('AÇÕES: extractTasks classifica cards do painel (GO/COLLECT/rodadas/kind)', async () => {
   const env = createContentEnv(TASKS_HTML);
-  const { tasks } = env.AC.actions.extractTasks();
+  const { tasks, debug } = await env.AC.actions.extractTasks();
 
-  assert.equal(tasks.length, 3);
+  assert.equal(tasks.length, 4);
+  assert.deepEqual(
+    { ...debug, sampleButtons: [...debug.sampleButtons] },
+    { rawCards: 4, visibleCards: 4, sampleButtons: ['GO', '+40', 'GO', 'Iniciar agora'] }
+  );
 
   assert.equal(tasks[0].kind, 'surprise');
   assert.equal(tasks[0].isActionable, true);
@@ -332,6 +341,14 @@ test('AÇÕES: extractTasks classifica cards do painel (GO/COLLECT/rodadas/kind)
 
   assert.equal(tasks[2].kind, 'app-only');
   assert.equal(tasks[2].isDone, true, 'opacidade 0.5 + não resgatável = concluída');
+  assert.equal(tasks[2].isActionable, false);
+
+  // Regressão do painel em contas novas: rótulos fora de GO/IR ("Iniciar
+  // agora") precisam ser tratados como executáveis — antes ficavam pendentes
+  // para sempre e o run encerrava sem executar nada.
+  assert.equal(tasks[3].kind, 'search');
+  assert.equal(tasks[3].isActionable, true, 'rótulo alternativo deve ser executável');
+  assert.equal(tasks[3].isDone, false);
 });
 
 test('AÇÕES: clickTask envia clique confiável (TRUSTED_CLICK) com coordenadas', async () => {

@@ -37,10 +37,9 @@
 
     if (
       t.includes('search') ||
-      t.includes('pesquisa') ||
-      t.includes('pesquisar') ||
-      t.includes('buscar') ||
+      t.includes('pesquis') ||
       t.includes('busca') ||
+      t.includes('busq') ||
       d.includes('keywords') ||
       d.includes('palavra')
     ) {

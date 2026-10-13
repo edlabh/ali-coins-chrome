@@ -490,8 +490,8 @@
       closeModals();
 
       // Candidatos: TODOS os textos "Ganhe mais moedas" (mais internos primeiro)
-      // — o clique anterior mirava um único alvo e o handler podia estar no
-      // elemento irmão/filho. Também usa o candidato por classe como reserva.
+      // — o clique por coordenadas (CDP) atinge o alvo visual correto. Também
+      // usa o candidato por classe como reserva.
       const candidates = findAllByText(S.tasks.openDrawerTexts, {
         tagNames: ['button', 'a', 'div', 'span'],
         maxCandidates: 6000
@@ -511,17 +511,19 @@
         continue;
       }
 
-      // Cicla pelos candidatos, mais interno primeiro. smartClick usa o clique
-      // REAL por coordenadas (CDP quando disponível), como um tap do usuário.
       const target = candidates[0];
       clickedTargets.push((target.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 40));
       await smartClick(target);
 
-      const opened = await waitUntil(() => drawerOpen() || queryVisible(S.tasks.taskItem), {
-        timeout: 4000,
+      // Prefere aguardar os CARDS renderizarem: a gaveta pode atingir altura
+      // visível durante a animação, ANTES do conteúdo existir — aceitar só a
+      // altura fazia a extração rodar cedo demais e achar 0 tarefas.
+      const cardsReady = await waitUntil(() => queryVisible(S.tasks.taskItem), {
+        timeout: 5000,
         interval: 300
       });
-      if (opened) return { ok: true };
+      if (cardsReady) return { ok: true };
+      if (drawerOpen()) return { ok: true };
 
       // Este alvo não abriu o painel: não repete o mesmo na sequência.
       failedTargets.add(target);
@@ -530,8 +532,16 @@
     return { ok: false, debug: { ...drawerDebug(), clickedTargets } };
   }
 
-  function extractTasks() {
-    const rows = Array.from(document.querySelectorAll(S.tasks.taskItem)).filter((e) => AC.dom.isVisible(e));
+  async function extractTasks() {
+    // A gaveta pode ABRIR antes dos cards renderizarem (animação/rede): aguarda
+    // brevemente por conteúdo antes de concluir que o painel está vazio.
+    if (drawerOpen() && !queryVisible(S.tasks.taskItem)) {
+      await waitUntil(() => queryVisible(S.tasks.taskItem), { timeout: 4000, interval: 250 });
+    }
+
+    const allRows = Array.from(document.querySelectorAll(S.tasks.taskItem));
+    const rows = allRows.filter((e) => AC.dom.isVisible(e));
+
     const tasks = rows.map((row, idx) => {
       const title = (row.querySelector(S.tasks.taskTitle)?.innerText || '').trim();
       const desc = (row.querySelector(S.tasks.taskSecondTitle)?.innerText || '').trim();
@@ -548,17 +558,23 @@
         totalRounds = Number.parseInt(sm[2], 10);
       }
 
-      const isActionable = /^(GO|IR)$/i.test(btnText);
-      const isClaimable = /^(COLLECT|COLETAR|GET|RECEBER|CLAIM|RESGATAR|\+[0-9]+)/i.test(btnText);
+      const isClaimable = /^(COLLECT|COLETAR|GET|RECEBER|CLAIM|RESGATAR|\+[0-9]+|[0-9]+)$/i.test(btnText);
+      const isDisabledStyle = btnStyle.includes('opacity: 0.5');
+      const isDoneText = /^(DONE|CONCLU[IÍ]DO|COMPLETED|CHECKED)$/i.test(btnText);
 
       let isDone;
       if (completedRounds !== null && totalRounds !== null) {
         isDone = completedRounds >= totalRounds && !isClaimable;
       } else {
-        const isDisabledStyle = btnStyle.includes('opacity: 0.5');
-        const isDoneText = /^(DONE|CONCLU[IÍ]DO|COMPLETED)$/i.test(btnText);
         isDone = !isClaimable && (isDisabledStyle || isDoneText);
       }
+
+      // Ação executável: botão habilitado com algum rótulo e tarefa não
+      // concluída — independente do texto exato ("GO", "Ir", "Start", "Ver"...).
+      // Antes exigíamos /^(GO|IR)$/ e contas novas (UI/idioma diferentes) caíam
+      // em "sem tarefas pendentes" sem executar nada.
+      const isActionable =
+        !isDone && !isClaimable && btnText.length > 0 && !isDisabledStyle && !isDoneText;
 
       const kind = AC.classifyTask(title, desc);
       const scrollSeconds = AC.scrollSecondsForTask(title, desc, 10);
@@ -578,7 +594,17 @@
         scrollSeconds
       };
     });
-    return { tasks };
+
+    return {
+      tasks,
+      debug: {
+        rawCards: allRows.length,
+        visibleCards: rows.length,
+        sampleButtons: rows
+          .slice(0, 5)
+          .map((r) => (r.querySelector(S.tasks.taskBtn)?.innerText || '').trim())
+      }
+    };
   }
 
   async function clickTask({ index, title }) {

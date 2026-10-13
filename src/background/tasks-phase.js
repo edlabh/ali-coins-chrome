@@ -43,7 +43,16 @@ export async function runTasksPhase(ctx) {
     }
 
     const extraction = await commandWithCaptcha(ctx, CMD.EXTRACT_TASKS, {}, 'tasks');
-    const tasks = (extraction && extraction.tasks) || [];
+    let tasks = (extraction && extraction.tasks) || [];
+
+    // Primeira abertura do painel: os cards podem renderizar com atraso — faz
+    // UMA re-extração antes de concluir que não há nada (o sintoma clássico era
+    // a gaveta abrir, a extração achar 0 e o run encerrar sem executar tarefa).
+    if (tasks.length === 0 && guard === 1) {
+      await sleepAbortable(1500);
+      const retry = await commandWithCaptcha(ctx, CMD.EXTRACT_TASKS, {}, 'tasks');
+      tasks = (retry && retry.tasks) || [];
+    }
 
     if (guard === 1) {
       const summary = summarizeTasks(tasks);
@@ -77,10 +86,11 @@ export async function runTasksPhase(ctx) {
     });
 
     if (!next) {
+      const dbg = extraction && extraction.debug ? ` Diagnóstico: ${JSON.stringify(extraction.debug)}` : '';
       await appendLog(
         ctx,
         tasks.length === 0
-          ? 'Nenhum card de tarefa encontrado no painel.'
+          ? `Nenhum card de tarefa encontrado no painel.${dbg}`
           : 'Sem tarefas pendentes (concluídas ou no limite de tentativas).'
       );
       break;

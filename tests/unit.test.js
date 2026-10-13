@@ -233,6 +233,8 @@ test('classifyTask identifica surpresa, busca, prize-land e app-only', () => {
   assert.equal(classifyTask('Toque em 3 itens', ''), 'surprise');
   assert.equal(classifyTask('Search products', 'Use keywords'), 'search');
   assert.equal(classifyTask('Pesquisar produtos', ''), 'search');
+  assert.equal(classifyTask('Pesquise produtos', ''), 'search');
+  assert.equal(classifyTask('Busque ofertas', ''), 'search');
   assert.equal(classifyTask('Prize Land', 'Water your tree'), 'prize-land');
   assert.equal(classifyTask('Merge Boss game', ''), 'app-only');
   assert.equal(classifyTask('Avaliar pedido', 'Review'), 'app-only');
