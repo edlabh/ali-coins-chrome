@@ -172,13 +172,15 @@ Decisões de projeto relevantes:
 ## Desenvolvimento
 
 ```bash
+npm ci          # devDependencies (apenas ESLint — runtime não tem dependências)
 npm test        # testes unitários (node --test) da lógica pura
-npm run check   # checagem de sintaxe de todos os scripts
+npm run check   # checagem de sintaxe de todos os módulos
+npm run lint    # ESLint (configuração flat)
 npm run icons   # regera os ícones (tools/make-icons.py)
 ```
 
-O **CI** (GitHub Actions — `.github/workflows/ci.yml`) roda `npm run check` e `npm test`
-em cada push/PR; como não há dependências, não é preciso instalar nada.
+O **CI** (GitHub Actions — `.github/workflows/ci.yml`) roda `npm ci`, `npm run check`,
+`npm run lint` e `npm test` em cada push/PR.
 
 ## Limitações conhecidas
 

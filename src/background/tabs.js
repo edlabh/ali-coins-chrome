@@ -174,7 +174,9 @@ export async function applyDeviceRules(tabId, settings) {
   try {
     await chrome.declarativeNetRequest.updateSessionRules({ addRules: [uaRule] });
   } catch (err) {
-    throw new Error(`Falha ao aplicar a regra de User-Agent mobile (Pixel): ${err.message}`);
+    throw new Error(`Falha ao aplicar a regra de User-Agent mobile (Pixel): ${err.message}`, {
+      cause: err
+    });
   }
 
   const hintsRule = {

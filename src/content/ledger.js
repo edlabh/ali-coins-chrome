@@ -205,7 +205,7 @@
       if (p2 > 12) hasP2GreaterThan12 = true;
     }
 
-    let isUsFormat = false;
+    let isUsFormat;
     if (hasP2GreaterThan12) {
       isUsFormat = true;
     } else if (hasP1GreaterThan12) {

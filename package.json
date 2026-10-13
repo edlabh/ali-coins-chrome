@@ -6,7 +6,13 @@
   "description": "Extensão Chrome que replica o ali-coins (check-in e tarefas de moedas do AliExpress) com emulação mobile Pixel 8.",
   "scripts": {
     "test": "node --test tests/*.test.js",
+    "lint": "eslint .",
     "check": "node --check src/background/service-worker.js && node --check src/background/runner.js && node --check src/background/context.js && node --check src/background/gates.js && node --check src/background/auth.js && node --check src/background/ledger-read.js && node --check src/background/checkin-phase.js && node --check src/background/tasks-phase.js && node --check src/background/finalize.js && node --check src/background/storage.js && node --check src/background/tabs.js && node --check src/background/notify.js && node --check src/background/scheduler.js && node --check src/background/retry.js && node --check src/background/cdp.js && node --check src/common/constants.js && node --check src/common/schedule.js && node --check src/common/state-utils.js && node --check src/common/accounting.js && node --check src/common/format.js && node --check src/common/crypt.js && node --check src/content/selectors.js && node --check src/content/task-classify.js && node --check src/content/ledger.js && node --check src/content/dom.js && node --check src/content/actions.js && node --check src/content/bridge.js && node --check src/popup/popup.js && node --check src/options/options.js",
     "icons": "python3 tools/make-icons.py"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0"
   }
 }

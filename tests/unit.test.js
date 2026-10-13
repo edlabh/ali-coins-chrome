@@ -41,7 +41,7 @@ const root = path.resolve(__dirname, '..');
 function loadTaskClassify() {
   const code = readFileSync(path.join(root, 'src/content/task-classify.js'), 'utf8');
   const moduleObj = { exports: {} };
-  // eslint-disable-next-line no-new-func
+   
   const fn = new Function('module', 'exports', 'self', `${code}\nreturn module.exports;`);
   return fn(moduleObj, moduleObj.exports, undefined);
 }
@@ -359,7 +359,7 @@ test('main-world spoofa navigator apenas na aba de execução', () => {
 function loadLedger() {
   const code = readFileSync(path.join(root, 'src/content/ledger.js'), 'utf8');
   const moduleObj = { exports: {} };
-  // eslint-disable-next-line no-new-func
+   
   const fn = new Function('module', 'exports', 'self', `${code}\nreturn module.exports;`);
   return fn(moduleObj, moduleObj.exports, undefined);
 }

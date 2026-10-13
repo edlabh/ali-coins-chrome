@@ -34,7 +34,7 @@
     for (const raw of list) {
       const sel = raw.trim();
       if (!sel) continue;
-      let found = null;
+      let found;
       try {
         found = document.querySelectorAll(sel);
       } catch {
@@ -59,7 +59,7 @@
       try {
         value = fn();
       } catch {
-        value = null;
+        // mantém null (falha de leitura transitória)
       }
       if (value) return value;
       if (Date.now() >= deadline) return null;
@@ -361,7 +361,7 @@
    */
   async function scrollFor(seconds, isAborted) {
     const end = Date.now() + Math.max(1, seconds) * 1000;
-    let scroller = document.scrollingElement || document.documentElement;
+    const scroller = document.scrollingElement || document.documentElement;
     while (Date.now() < end) {
       if (isAborted && isAborted()) return false;
       const step = 250 + Math.floor(Math.random() * 450);

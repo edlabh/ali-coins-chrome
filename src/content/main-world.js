@@ -17,9 +17,9 @@
 
   if (typeof navigator === 'undefined' || typeof location === 'undefined') return;
 
-  var UA =
+  const UA =
     'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36';
-  var APP_VERSION =
+  const APP_VERSION =
     '5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36';
 
   function isRunTab() {
@@ -36,7 +36,7 @@
     return false;
   }
 
-  var proto = null;
+  let proto = null;
   try {
     proto = Object.getPrototypeOf(navigator);
   } catch (err) {
@@ -67,41 +67,41 @@
     return desc.value;
   }
 
-  var origUA = original('userAgent');
+  const origUA = original('userAgent');
   define('userAgent', function () {
     return isRunTab() ? UA : fallback(origUA, this);
   });
 
-  var origAppVersion = original('appVersion');
+  const origAppVersion = original('appVersion');
   define('appVersion', function () {
     return isRunTab() ? APP_VERSION : fallback(origAppVersion, this);
   });
 
-  var origPlatform = original('platform');
+  const origPlatform = original('platform');
   define('platform', function () {
     return isRunTab() ? 'Linux armv8l' : fallback(origPlatform, this);
   });
 
-  var origVendor = original('vendor');
+  const origVendor = original('vendor');
   define('vendor', function () {
     return isRunTab() ? 'Google Inc.' : fallback(origVendor, this);
   });
 
-  var origTouchPoints = original('maxTouchPoints');
+  const origTouchPoints = original('maxTouchPoints');
   define('maxTouchPoints', function () {
     return isRunTab() ? 5 : fallback(origTouchPoints, this);
   });
 
-  var origUAD = original('userAgentData');
-  var fakeUAD = null;
+  const origUAD = original('userAgentData');
+  let fakeUAD = null;
 
   function buildFakeUAD() {
-    var brands = [
+    const brands = [
       { brand: 'Chromium', version: '140' },
       { brand: 'Google Chrome', version: '140' },
       { brand: 'Not_A Brand', version: '24' }
     ];
-    var fullVersionList = [
+    const fullVersionList = [
       { brand: 'Chromium', version: '140.0.0.0' },
       { brand: 'Google Chrome', version: '140.0.0.0' },
       { brand: 'Not_A Brand', version: '24.0.0.0' }

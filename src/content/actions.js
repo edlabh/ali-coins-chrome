@@ -551,7 +551,7 @@
       const isActionable = /^(GO|IR)$/i.test(btnText);
       const isClaimable = /^(COLLECT|COLETAR|GET|RECEBER|CLAIM|RESGATAR|\+[0-9]+)/i.test(btnText);
 
-      let isDone = false;
+      let isDone;
       if (completedRounds !== null && totalRounds !== null) {
         isDone = completedRounds >= totalRounds && !isClaimable;
       } else {

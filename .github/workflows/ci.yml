@@ -14,10 +14,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
-      # Sem dependências de runtime/dev: nenhum `npm ci` é necessário.
+      - name: Instalar devDependencies (ESLint)
+        run: npm ci
+
       - name: Syntax check (todos os módulos)
         run: npm run check
+
+      - name: Lint (ESLint)
+        run: npm run lint
 
       - name: Testes unitários (node --test)
         run: npm test
