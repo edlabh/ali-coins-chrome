@@ -325,17 +325,53 @@
     return el.getBoundingClientRect().height > 100;
   }
 
+  /**
+   * Skeleton do SPA — conta apenas quando VISÍVEL. O nó `.login-pending-container`
+   * pode permanecer oculto no DOM após o load; checar por mera presença bailava
+   * a abertura do painel e as tarefas nunca eram tentadas.
+   */
+  function skeletonVisible() {
+    const el = document.querySelector(S.login.loginPendingContainer);
+    return Boolean(el && AC.dom.isVisible(el));
+  }
+
+  /** Diagnóstico curto anexado ao relatório quando a gaveta não abre. */
+  function drawerDebug() {
+    const buttons = Array.from(
+      document.querySelectorAll('button, [role="button"], div[class*="button"], div[class*="Button"]')
+    )
+      .filter((el) => AC.dom.isVisible(el))
+      .map((el) => (el.textContent || '').trim().replace(/\s+/g, ' '))
+      .filter((t) => t && t.length <= 40)
+      .slice(0, 8);
+    return {
+      url: location.href.slice(0, 110),
+      cards: document.querySelectorAll(S.tasks.taskItem).length,
+      drawerNode: Boolean(document.querySelector(S.tasks.drawerContainer)),
+      buttons
+    };
+  }
+
+  /** Candidatos que na verdade são o botão de check-in/coleta (não a gaveta). */
+  function isCheckinCandidate(el) {
+    const text = (el.textContent || '').trim();
+    if (!text) return false;
+    if (S.tasks.openDrawerTexts.some((re) => re.test(text))) return false;
+    return S.checkin.collectButtonTexts.some((re) => re.test(text)) || /checked|coletado/i.test(text);
+  }
+
   async function openDrawer() {
     if (captchaInfo().present) return { needsCaptcha: true };
     if (drawerOpen()) return { ok: true };
 
-    // Skeleton do SPA: aguarda sumir (o reload fica a cargo do run seguinte).
-    const skeleton = await waitUntil(() => !document.querySelector(S.login.loginPendingContainer), {
-      timeout: 10000,
-      interval: 350
-    });
-    if (!skeleton && document.querySelector(S.login.loginPendingContainer)) {
-      return { ok: false, skeleton: true };
+    // Aguarda o SPA estabilizar, mas sem bloquear quando a página já está
+    // utilizável: a prioridade é encontrar o botão (como o verifier do ali-coins,
+    // que sai do laço assim que o botão aparece, mesmo com skeleton no DOM).
+    for (let wait = 0; wait < 20; wait += 1) {
+      if (isStopped()) return { aborted: true };
+      if (queryVisible(S.tasks.taskItem) || drawerOpen()) break;
+      if (!skeletonVisible() && wait > 2) break;
+      await sleep(350);
     }
 
     for (let attempt = 1; attempt <= 5; attempt += 1) {
@@ -343,10 +379,23 @@
       if (captchaInfo().present) return { needsCaptcha: true };
       closeModals();
 
-      let btn = queryVisible(S.tasks.openDrawerBtn);
+      // 1) Texto primeiro ("Earn more coins"/"Ganhe mais moedas"): os seletores
+      // por classe também casam o botão de check-in (aecoin-signButton) e o
+      // clique caía no alvo errado — o painel nunca abria.
+      let btn = findByText(S.tasks.openDrawerTexts, {
+        tagNames: ['button', 'div', 'span'],
+        maxCandidates: 3000
+      });
+      if (btn) btn = AC.dom.clickableFrom(btn);
+
+      // 2) Fallback por classe, descartando candidatos que pareçam check-in.
       if (!btn) {
-        btn = findByText(S.tasks.openDrawerTexts, { tagNames: ['button', 'div'], maxCandidates: 2500 });
+        const candidate = queryVisible(S.tasks.openDrawerBtn);
+        if (candidate && !isCheckinCandidate(candidate)) {
+          btn = AC.dom.clickableFrom(candidate);
+        }
       }
+
       if (btn) {
         clickHuman(btn);
         const opened = await waitUntil(() => drawerOpen() || queryVisible(S.tasks.taskItem), {
@@ -355,11 +404,11 @@
         });
         if (opened) return { ok: true };
       } else {
-        window.scrollBy(0, 150);
+        window.scrollBy(0, 220);
       }
       await sleep(1400);
     }
-    return { ok: false };
+    return { ok: false, debug: drawerDebug() };
   }
 
   function extractTasks() {

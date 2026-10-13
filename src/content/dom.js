@@ -265,6 +265,34 @@
     return true;
   }
 
+  /**
+   * Sobe na árvore até um elemento realmente clicável (button/a/[role=button]
+   * ou div/span com classe de botão). Evita clicar no texto interno (span) de um
+   * botão que só ouve eventos no container.
+   * @param {Element} el
+   * @param {number} [maxLevels=4]
+   * @returns {Element}
+   */
+  function clickableFrom(el, maxLevels = 4) {
+    let node = el;
+    for (let i = 0; node && i < maxLevels; i += 1) {
+      try {
+        if (
+          node.matches &&
+          node.matches('button, a, [role="button"], input[type="button"], input[type="submit"]')
+        ) {
+          return node;
+        }
+        const cls = typeof node.className === 'string' ? node.className : '';
+        if (/button|btn/i.test(cls)) return node;
+      } catch {
+        // segue para o pai
+      }
+      node = node.parentElement;
+    }
+    return el;
+  }
+
   AC.dom = {
     sleep,
     isVisible,
@@ -272,6 +300,7 @@
     waitUntil,
     waitVisible,
     clickHuman,
+    clickableFrom,
     setNativeValue,
     pressEnter,
     bodyText,

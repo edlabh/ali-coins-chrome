@@ -465,7 +465,8 @@ async function runTasksPhase(ctx) {
     await ensureCoinPage(ctx, false);
     const drawer = await commandWithCaptcha(ctx, CMD.OPEN_DRAWER, {}, 'drawer');
     if (!drawer || !drawer.ok) {
-      stats.errors.push('Painel "Ganhe mais moedas" inacessível.');
+      const dbg = drawer && drawer.debug ? ` Diagnóstico: ${JSON.stringify(drawer.debug)}` : '';
+      stats.errors.push(`Painel "Ganhe mais moedas" inacessível.${dbg}`.slice(0, 500));
       break;
     }
 
