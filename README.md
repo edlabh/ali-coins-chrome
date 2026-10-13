@@ -205,6 +205,7 @@ src/content/              seletores, classificação, DOM, ações, bridge
 src/popup/                popup de status
 src/options/              página de opções
 tests/unit.test.js        testes da lógica pura + sanidade do manifest
+tests/content-dom.test.js testes de DOM (jsdom) dos content scripts reais
 tools/make-icons.py       gerador de ícones (sem dependências)
 ```
 
