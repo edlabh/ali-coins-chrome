@@ -1,0 +1,15 @@
+# Dependências (não há nenhuma em runtime; scripts usam apenas Node/Python)
+node_modules/
+
+# Logs e artefatos locais de diagnóstico
+*.log
+scratch/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Editores/IDEs
+.idea/
+.vscode/
+*.swp

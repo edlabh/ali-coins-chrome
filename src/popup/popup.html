@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Ali Coins</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="header">
+    <img src="../../icons/icon48.png" alt="" class="logo" />
+    <div class="titles">
+      <h1>Ali Coins</h1>
+      <p class="subtitle">Check-in e tarefas do AliExpress</p>
+    </div>
+  </header>
+
+  <section id="status" class="card status">
+    <div class="status-line">
+      <span id="statusDot" class="dot idle"></span>
+      <strong id="statusPhase">Inativo</strong>
+    </div>
+    <p id="statusMessage" class="muted">Pronto para executar.</p>
+    <p id="statusTiming" class="muted small"></p>
+  </section>
+
+  <section id="warnings" class="warnings hidden">
+    <div id="warnCredentials" class="warn hidden">
+      Configure <strong>usuário e senha</strong> em <em>Opções</em> para começar.
+    </div>
+    <div id="warnBlocked" class="warn hidden">
+      Bloqueio anti-bot ativo. Execuções pausadas por precaução até o horário indicado.
+    </div>
+  </section>
+
+  <section class="actions">
+    <button id="btnRun" class="btn primary">▶ Executar agora</button>
+    <button id="btnStop" class="btn danger hidden">■ Parar</button>
+    <button id="btnOpen" class="btn">Abrir janela mobile</button>
+    <button id="btnOptions" class="btn ghost">Opções</button>
+  </section>
+
+  <section id="scheduleCard" class="card hidden">
+    <h2>Agenda</h2>
+    <p id="scheduleText" class="muted small"></p>
+  </section>
+
+  <section id="reportCard" class="card hidden">
+    <h2>Última execução</h2>
+    <p id="reportHead" class="muted small"></p>
+    <ul id="reportLines" class="report"></ul>
+  </section>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

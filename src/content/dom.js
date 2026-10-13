@@ -1,0 +1,284 @@
+/**
+ * Helpers de DOM para o content script.
+ * Todos os utilitários são expostos em `self.AC.dom`.
+ */
+(function () {
+  'use strict';
+
+  const AC = (self.AC = self.AC || {});
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  /**
+   * Elemento visível e "acionável" (com caixa, sem display:none/visibility:hidden).
+   * @param {Element | null | undefined} el
+   */
+  function isVisible(el) {
+    if (!el || !(el instanceof Element)) return false;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    const style = window.getComputedStyle(el);
+    if (!style || style.visibility === 'hidden' || style.display === 'none') return false;
+    if (Number.parseFloat(style.opacity || '1') === 0) return false;
+    return true;
+  }
+
+  /**
+   * Primeiro elemento visível que casa com QUALQUER um dos seletores (separados por vírgula
+   * ou em lista). Nunca lança para seletores inválidos.
+   * @param {string | string[]} selectors
+   * @returns {Element | null}
+   */
+  function queryVisible(selectors) {
+    const list = Array.isArray(selectors) ? selectors : String(selectors || '').split(',');
+    for (const raw of list) {
+      const sel = raw.trim();
+      if (!sel) continue;
+      let found = null;
+      try {
+        found = document.querySelectorAll(sel);
+      } catch {
+        continue;
+      }
+      for (const el of found) {
+        if (isVisible(el)) return el;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Aguarda até que `fn()` retorne algo truthy.
+   * @param {() => any} fn
+   * @param {{timeout?: number, interval?: number}} [options]
+   */
+  async function waitUntil(fn, { timeout = 8000, interval = 250 } = {}) {
+    const deadline = Date.now() + timeout;
+    for (;;) {
+      let value = null;
+      try {
+        value = fn();
+      } catch {
+        value = null;
+      }
+      if (value) return value;
+      if (Date.now() >= deadline) return null;
+      await sleep(interval);
+    }
+  }
+
+  /**
+   * Aguarda um seletor visível.
+   * @param {string | string[]} selectors
+   * @param {number} [timeout=8000]
+   */
+  function waitVisible(selectors, timeout = 8000) {
+    return waitUntil(() => queryVisible(selectors), { timeout });
+  }
+
+  /**
+   * Clique "humano": sequência de eventos de ponteiro + click().
+   * Os eventos sintéticos bastam para os handlers do AliExpress (o próprio
+   * ali-coins usa el.click() via evaluate como fallback em vários pontos).
+   * @param {Element} el
+   */
+  function clickHuman(el) {
+    if (!el) return false;
+    try {
+      el.scrollIntoView({ block: 'center', inline: 'center' });
+    } catch {
+      // segue
+    }
+    const rect = el.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const base = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, view: window };
+    const seq = [
+      new PointerEvent('pointerdown', { ...base, pointerId: 1, pointerType: 'touch', isPrimary: true }),
+      new MouseEvent('mousedown', base),
+      new PointerEvent('pointerup', { ...base, pointerId: 1, pointerType: 'touch', isPrimary: true }),
+      new MouseEvent('mouseup', base)
+    ];
+    for (const ev of seq) {
+      try {
+        el.dispatchEvent(ev);
+      } catch {
+        // PointerEvent indisponível: ignora o evento específico.
+      }
+    }
+    try {
+      el.click();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Define o valor de um input usando o setter nativo (React/SPA-safe) + eventos.
+   * @param {HTMLInputElement} input
+   * @param {string} value
+   */
+  function setNativeValue(input, value) {
+    const proto = Object.getPrototypeOf(input);
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (setter) {
+      setter.call(input, value);
+    } else {
+      input.value = value;
+    }
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  /**
+   * Simula Enter em um input.
+   * @param {HTMLElement} el
+   */
+  function pressEnter(el) {
+    const opts = { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 };
+    el.dispatchEvent(new KeyboardEvent('keydown', opts));
+    el.dispatchEvent(new KeyboardEvent('keypress', opts));
+    el.dispatchEvent(new KeyboardEvent('keyup', opts));
+  }
+
+  /** Texto do body (limitado para não pesar em páginas grandes). */
+  function bodyText(limit = 40000) {
+    const text = (document.body && document.body.innerText) || '';
+    return text.slice(0, limit);
+  }
+
+  /**
+   * Procura um elemento clicável por texto (botões/divs/a).
+   * @param {RegExp[]} patterns
+   * @param {{tagNames?: string[], maxCandidates?: number}} [options]
+   * @returns {Element | null}
+   */
+  function findByText(patterns, options = {}) {
+    const tags = options.tagNames || ['button', 'a', 'div', 'span'];
+    const maxCandidates = options.maxCandidates || 4000;
+    let candidates;
+    try {
+      candidates = document.querySelectorAll(tags.join(','));
+    } catch {
+      return null;
+    }
+    let checked = 0;
+    for (const el of candidates) {
+      checked += 1;
+      if (checked > maxCandidates) break;
+      const text = (el.textContent || '').trim();
+      if (!text || text.length > 60) continue;
+      if (patterns.some((re) => re.test(text)) && isVisible(el)) {
+        return el;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Fecha modais/toasts com segurança: apenas elementos de fechar dentro de
+   * containers de diálogo/overlay (como closeModals do ali-coins).
+   */
+  function closeModals() {
+    const S = AC.selectors;
+    let closed = false;
+    const containers = 'dialog, [role="dialog"], [class*="modal"], [class*="dialog"], [class*="popup"], [class*="toast"], [class*="overlay"], [class*="mask"]';
+
+    for (const sel of S.modals.closeSelectors) {
+      let els;
+      try {
+        els = document.querySelectorAll(sel);
+      } catch {
+        continue;
+      }
+      for (const el of els) {
+        if (!isVisible(el)) continue;
+        if (!el.closest(containers)) continue;
+        const rect = el.getBoundingClientRect();
+        // Evita fechar a página inteira/gaveta: alvos pequenos apenas.
+        if (rect.width > 300 && rect.height > 300) continue;
+        clickHuman(el);
+        closed = true;
+      }
+    }
+
+    for (const el of document.querySelectorAll('button, div[role="button"], span[role="button"]')) {
+      if (!isVisible(el)) continue;
+      if (!el.closest(containers)) continue;
+      const text = (el.textContent || '').trim();
+      if (!text || text.length > 12) continue;
+      if (S.modals.closeTexts.some((re) => re.test(text))) {
+        clickHuman(el);
+        closed = true;
+      }
+    }
+    return closed;
+  }
+
+  /**
+   * Detecta captcha/desafio de segurança.
+   * @returns {{present: boolean, kind: 'slider'|'iframe'|'risk'|null}}
+   */
+  function captchaInfo() {
+    const S = AC.selectors.captcha;
+    // Ordem: slider -> containers/iframes -> texto de risco (evita falso RGV587
+    // quando o texto aparece DENTRO do próprio desafio visual).
+    if (queryVisible(S.sliderHandle)) {
+      return { present: true, kind: 'slider' };
+    }
+    const container = queryVisible(S.containers);
+    if (container) {
+      return { present: true, kind: 'iframe' };
+    }
+    if (S.riskText.test(bodyText(20000))) {
+      return { present: true, kind: 'risk' };
+    }
+    return { present: false, kind: null };
+  }
+
+  /** Parser numérico com separadores de milhar. */
+  function parseNumber(raw) {
+    if (raw === null || raw === undefined) return null;
+    const n = Number.parseInt(String(raw).replace(/[.,]/g, ''), 10);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  /**
+   * Rola a página por `seconds` segundos (scroll incremental), com abort flag.
+   * Retorna false se interrompido pela flag.
+   */
+  async function scrollFor(seconds, isAborted) {
+    const end = Date.now() + Math.max(1, seconds) * 1000;
+    let scroller = document.scrollingElement || document.documentElement;
+    while (Date.now() < end) {
+      if (isAborted && isAborted()) return false;
+      const step = 250 + Math.floor(Math.random() * 450);
+      try {
+        window.scrollBy(0, step);
+        if (scroller && scroller !== document.scrollingElement) scroller.scrollTop += step;
+      } catch {
+        // segue
+      }
+      await sleep(900 + Math.floor(Math.random() * 500));
+    }
+    return true;
+  }
+
+  AC.dom = {
+    sleep,
+    isVisible,
+    queryVisible,
+    waitUntil,
+    waitVisible,
+    clickHuman,
+    setNativeValue,
+    pressEnter,
+    bodyText,
+    findByText,
+    closeModals,
+    captchaInfo,
+    parseNumber,
+    scrollFor
+  };
+})();

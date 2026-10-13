@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Ali Coins — Opções</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <img src="../../icons/icon48.png" alt="" />
+      <div>
+        <h1>Ali Coins — Opções</h1>
+        <p class="muted">Check-in diário de moedas e tarefas "Ganhe mais moedas" do AliExpress, em janela mobile (Pixel 8).</p>
+      </div>
+    </header>
+
+    <section class="card">
+      <h2>Credenciais</h2>
+      <label>
+        <span>Usuário (e-mail ou telefone)</span>
+        <input id="user" type="text" autocomplete="username" placeholder="seu_email@exemplo.com" />
+      </label>
+      <label>
+        <span>Senha</span>
+        <input id="password" type="password" autocomplete="new-password" placeholder="(deixe em branco para manter a atual)" />
+      </label>
+      <p id="passwordState" class="muted small"></p>
+      <p class="muted small">
+        A senha é cifrada (AES-256-GCM) com uma chave não exportável guardada na extensão antes de ser salva.
+        Recomenda-se usar um perfil dedicado do Chrome para automação.
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>Agendamento</h2>
+      <label class="row">
+        <input id="scheduleEnabled" type="checkbox" />
+        <span>Executar todos os dias no horário:</span>
+        <input id="scheduleTime" type="time" value="09:30" />
+      </label>
+      <label class="row">
+        <input id="runOnStartup" type="checkbox" />
+        <span>Executar ao abrir o Chrome</span>
+      </label>
+      <label class="row">
+        <span>Atraso inicial aleatório (min):</span>
+        <input id="startDelayMaxMin" type="number" min="0" max="180" step="1" />
+      </label>
+      <p class="muted small">O atraso inicial vale para execuções agendadas/na abertura (0 desliga). Execuções manuais começam imediatamente.</p>
+    </section>
+
+    <section class="card">
+      <h2>Tarefas</h2>
+      <label class="row">
+        <input id="skipAppOnlyTasks" type="checkbox" />
+        <span>Ignorar tarefas exclusivas do app (Prize Land, minigames, quizzes, avaliações)</span>
+      </label>
+      <div class="grid">
+        <label>
+          <span>Máx. de ações por execução</span>
+          <input id="maxTaskActions" type="number" min="1" max="100" />
+        </label>
+        <label>
+          <span>Tentativas por tarefa</span>
+          <input id="maxAttemptsPerTask" type="number" min="1" max="10" />
+        </label>
+        <label>
+          <span>Pausa entre tarefas (mín. s)</span>
+          <input id="pauseMinS" type="number" min="0" max="600" />
+        </label>
+        <label>
+          <span>Pausa entre tarefas (máx. s)</span>
+          <input id="pauseMaxS" type="number" min="0" max="600" />
+        </label>
+        <label>
+          <span>Termo de busca das tarefas de busca</span>
+          <input id="searchQuery" type="text" placeholder="fone bluetooth" />
+        </label>
+        <label>
+          <span>Permanência/scroll nas tarefas (s)</span>
+          <input id="scrollSeconds" type="number" min="3" max="120" />
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Captcha e segurança</h2>
+      <div class="grid">
+        <label>
+          <span>Tempo máx. aguardando captcha (min)</span>
+          <input id="captchaTimeoutMin" type="number" min="1" max="30" />
+        </label>
+        <label>
+          <span>Cooldown após bloqueio anti-bot (h)</span>
+          <input id="riskCooldownHours" type="number" min="1" max="168" />
+        </label>
+      </div>
+      <p class="muted small">
+        Quando um captcha aparece, a janela móvel é trazida para frente e uma notificação é exibida.
+        Resolva o desafio na janela e a automação prossegue sozinha.
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>Janela e aparelho</h2>
+      <label class="row">
+        <span>Emulação:</span>
+        <select id="device">
+          <option value="pixel8">Google Pixel 8 (Android 14)</option>
+          <option value="pixel7">Google Pixel 7 (Android 13)</option>
+          <option value="custom">Personalizado</option>
+        </select>
+      </label>
+      <div id="customFields" class="grid hidden">
+        <label>
+          <span>User-Agent</span>
+          <input id="customUA" type="text" placeholder="Mozilla/5.0 (Linux; Android 14; ...) Mobile Safari/537.36" />
+        </label>
+        <label>
+          <span>Largura (CSS px)</span>
+          <input id="customWidth" type="number" min="320" max="1400" />
+        </label>
+        <label>
+          <span>Altura (CSS px)</span>
+          <input id="customHeight" type="number" min="480" max="2000" />
+        </label>
+      </div>
+      <label class="row">
+        <input id="keepWindowOpen" type="checkbox" />
+        <span>Manter a janela mobile aberta após a execução</span>
+      </label>
+      <label class="row">
+        <input id="notifications" type="checkbox" />
+        <span>Mostrar notificações do sistema</span>
+      </label>
+    </section>
+
+    <section class="actions">
+      <button id="btnSave" class="btn primary">Salvar</button>
+      <button id="btnRun" class="btn">Executar agora</button>
+      <button id="btnClearCreds" class="btn ghost">Limpar credenciais</button>
+      <button id="btnClearHistory" class="btn ghost">Limpar histórico</button>
+    </section>
+
+    <p id="saveStatus" class="status" role="status"></p>
+
+    <section class="card note">
+      <h2>Aviso</h2>
+      <p class="muted small">
+        Automação de conta própria no AliExpress pode contrariar os Termos de Uso do site e envolve risco de
+        bloqueio anti-bot (RGV587) ou de segurança da conta. Use por sua conta e risco, com um perfil de Chrome
+        dedicado. A extensão nunca envia suas credenciais para terceiros — tudo roda localmente no seu navegador.
+      </p>
+    </section>
+  </main>
+  <script src="options.js" type="module"></script>
+</body>
+</html>
