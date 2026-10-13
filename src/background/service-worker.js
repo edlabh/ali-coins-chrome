@@ -75,14 +75,22 @@ async function handleMessage(message, sender) {
     }
 
     // Cliques reais (CDP) solicitados pelo content script: o alvo é a aba que
-    // enviou a mensagem (tabs.sendMessage não transporta clique confiável).
+    // enviou a mensagem. Defesa em profundidade: SÓ a aba do run ativo pode
+    // pedir cliques reais (qualquer outra aba do AliExpress é rejeitada e o
+    // content script cai no clique sintético).
     case MSG.TRUSTED_CLICK: {
       const tabId = sender && sender.tab ? sender.tab.id : null;
       const payload = (message && message.payload) || {};
       const x = Number(payload.x);
       const y = Number(payload.y);
-      if (!tabId || !Number.isFinite(x) || !Number.isFinite(y)) {
+      const validCoords =
+        Number.isFinite(x) && Number.isFinite(y) && x >= 0 && y >= 0 && x <= 10000 && y <= 10000;
+      if (!tabId || !validCoords) {
         return { ok: false, error: 'parametros-invalidos' };
+      }
+      const runState = await getRunState();
+      if (!runState || !runState.active || runState.tabId !== tabId) {
+        return { ok: false, error: 'aba-fora-do-run' };
       }
       return await clickTrusted(tabId, x, y);
     }

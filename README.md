@@ -45,6 +45,8 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
    - **Modo silencioso** (**padrão**): executa em uma **aba de fundo, sem abrir
      janela** — a aba só vem para frente se um captcha/2FA precisar de você;
      desmarque para acompanhar a execução numa janela visível;
+   - **Notificação condicional** (opcional): avisar apenas quando houver novidade
+     (check-in novo, crédito do dia ou tarefas executadas) — erros sempre avisam;
    - atraso inicial aleatório, pausas entre tarefas, máximo de ações, etc.
 4. Use **▶ Executar agora** no popup para validar o fluxo manualmente.
 5. Quando um captcha aparecer, a janela mobile é trazida para frente e uma notificação

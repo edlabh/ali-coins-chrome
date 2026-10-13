@@ -128,7 +128,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   // só é trazida para frente quando um captcha/2FA precisar do usuário.
   // Desmarque nas Opções para acompanhar a execução numa janela visível.
   silentMode: true,
-  notifications: true
+  notifications: true,
+  // Notificação de conclusão apenas quando houver novidade (check-in novo,
+  // crédito do dia no extrato ou ações de tarefas). Erros sempre notificam.
+  notifyOnlyOnChange: false
 });
 
 export const RUN_HISTORY_LIMIT = 20;

@@ -47,8 +47,12 @@ import {
 } from './tabs.js';
 import { notify, notifyCaptcha, notifyResult, setBadge } from './notify.js';
 import { applySilentEmulation, attachCdp, detachCdp } from './cdp.js';
+import { coinsSourceLabel } from '../common/format.js';
 
 const KEEPALIVE_MS = 20000;
+// Um run sem NENHUMA atualização de estado por este tempo é considerado órfão
+// (ex.: service worker morto no meio). Heartbeats mantêm updatedAt fresco.
+const RUN_STALE_MS = 15 * 60 * 1000;
 let keepAliveTimer = null;
 
 /** Mantém o service worker vivo durante o run (MV3 encerra o SW ocioso em ~30s). */
@@ -109,8 +113,22 @@ function reasonLabel(reason) {
  */
 export async function startRun({ reason = 'manual', manual = false } = {}) {
   const existing = await getRunState();
+  let staleUnlocked = false;
   if (existing && existing.active) {
-    return { started: false, alreadyRunning: true };
+    const updatedAt = Number.isFinite(existing.updatedAt) ? existing.updatedAt : 0;
+    if (Date.now() - updatedAt > RUN_STALE_MS) {
+      // Estado órfão (SW morto no meio do run): destrava para não bloquear
+      // execuções futuras para sempre.
+      staleUnlocked = true;
+      await patchRunState({
+        active: false,
+        phase: PHASE.ERROR,
+        message: 'Execução anterior órfã destravada.',
+        stopRequested: false
+      });
+    } else {
+      return { started: false, alreadyRunning: true };
+    }
   }
 
   const runtime = await getRuntime();
@@ -158,6 +176,9 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
   };
 
   await appendLog(ctx, `Execução iniciada (${reasonLabel(reason)}).`);
+  if (staleUnlocked) {
+    await appendLog(ctx, 'Execução anterior órfã (>15 min sem atividade) foi destravada.');
+  }
   if (!credentialsConfigured) {
     await appendLog(
       ctx,
@@ -573,7 +594,20 @@ async function finalize(report, settings, ok) {
     stats: null
   });
   await setBadge(ok ? '✓' : '!', ok ? 'ok' : 'error');
-  await notifyResult(settings, ok, describeReport(report));
+
+  // Notificação: erros SEMPRE avisam; em sucesso, `notifyOnlyOnChange` permite
+  // silenciar quando não houve novidade (check-in novo/crédito do dia/tarefas).
+  const hasNews =
+    Boolean(
+      report.checkin &&
+        (report.checkin.justCollected ||
+          report.checkin.confirmedByLedger ||
+          report.checkin.checkinCoinsFromLedger)
+    ) || (Array.isArray(report.tasks) && report.tasks.length > 0);
+  const shouldNotify = !ok || !settings.notifyOnlyOnChange || hasNews;
+  if (shouldNotify) {
+    await notifyResult(settings, ok, describeReport(report));
+  }
 }
 
 function mapErrorPhase(status) {
@@ -600,35 +634,19 @@ function describeReport(report) {
 }
 
 /**
- * Verificação de cookie forte de sessão, usada como desempate quando a UI demora
- * a decidir se está autenticada (ex.: rede lenta). O login_aliyunid_ticket só é
- * emitido com autenticação bem-sucedida.
- * @returns {Promise<boolean>}
- */
-async function hasAuthCookie() {
-  try {
-    const ticket = await chrome.cookies.get({
-      url: 'https://www.aliexpress.com/',
-      name: 'login_aliyunid_ticket'
-    });
-    return Boolean(ticket && ticket.value);
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Garante que a sessão está autenticada SEM tentar login desnecessário:
  *   1. consulta o estado da página (CHECK_AUTH — somente leitura);
  *   2. só dispara o fluxo de login quando há formulário/prompt de login visível;
- *   3. UI indecisa por muito tempo → decide pelo cookie de sessão.
+ *   3. UI indecisa por muito tempo → prossegue como sessão existente, deixando
+ *      o check-in validar (auto-cura autentica se a página for de login).
  * @param {object} ctx
- * @returns {Promise<{ok: boolean, already?: boolean, cookieOnly?: boolean, error?: string}>}
+ * @returns {Promise<{ok: boolean, already?: boolean, assumed?: boolean, error?: string}>}
  */
 async function ensureAuthenticated(ctx) {
   await updatePhase(PHASE.AUTH, 'Verificando se a sessão do AliExpress já está ativa…');
 
   const deadline = Date.now() + 25000;
+  let sawLoginForm = false;
   while (Date.now() < deadline) {
     if (await isStopRequestedNow()) throw new RunAbortedError();
 
@@ -655,17 +673,23 @@ async function ensureAuthenticated(ctx) {
       return { ok: true, already: true };
     }
     if (st.state === 'needs_login') {
+      sawLoginForm = true;
       break;
     }
     // 'pending': esqueleto do SPA ainda carregando.
     await sleepAbortable(1800);
   }
 
-  // UI não decidiu dentro da janela: o cookie de sessão decide.
-  if (await hasAuthCookie()) {
-    await updatePhase(PHASE.AUTH, 'Cookie de sessão presente; login dispensado.');
-    await appendLog(ctx, 'Cookie de sessão presente — login dispensado.');
-    return { ok: true, already: true, cookieOnly: true };
+  if (!sawLoginForm) {
+    // UI não decidiu em 25s (sem formulário e sem central de moedas visíveis):
+    // prossegue como sessão existente — o check-in valida de fato e a auto-cura
+    // autentica (ou pede credenciais) se a página for de login.
+    await updatePhase(PHASE.AUTH, 'Sessão não confirmada pela UI; prosseguindo.');
+    await appendLog(
+      ctx,
+      'A página não confirmou a sessão em 25s; prosseguindo — o check-in valida e a auto-cura autentica se necessário.'
+    );
+    return { ok: true, already: true, assumed: true };
   }
 
   // Login realmente necessário: sem credenciais não há como prosseguir. Avisa
@@ -748,6 +772,7 @@ async function captchaGate(ctx, origin) {
     const remaining = deadline - Date.now();
     const chunkMs = Math.min(60000, Math.max(5000, remaining));
     const res = await cmd(ctx, CMD.WAIT_CAPTCHA, { chunkMs, origin }, { retries: 2 });
+    await patchRunState({}).catch(() => {}); // heartbeat anti-stale
     if (res.solved) {
       await setBadge('RUN', 'run');
       await appendLog(ctx, 'Captcha resolvido — retomando a automação.');
@@ -777,6 +802,7 @@ async function twoFAGate(ctx) {
   while (Date.now() < deadline) {
     if (await isStopRequestedNow()) throw new RunAbortedError();
     const res = await cmd(ctx, CMD.WAIT_2FA, { chunkMs: 60000 }, { retries: 2 });
+    await patchRunState({}).catch(() => {}); // heartbeat anti-stale
     if (res.ok) {
       await appendLog(ctx, '2FA concluído — retomando a automação.');
       return;
@@ -1058,11 +1084,19 @@ async function isStopRequestedNow() {
 async function sleepAbortable(ms) {
   const step = 500;
   let waited = 0;
+  let sinceHeartbeat = 0;
   while (waited < ms) {
     if (await isStopRequestedNow()) throw new RunAbortedError();
     const chunk = Math.min(step, ms - waited);
     await sleep(chunk);
     waited += chunk;
+    sinceHeartbeat += chunk;
+    // Heartbeat: mantém updatedAt fresco para a detecção de runs órfãos
+    // (cobre o atraso inicial longo e pausas entre tarefas).
+    if (sinceHeartbeat >= 60000) {
+      sinceHeartbeat = 0;
+      await patchRunState({}).catch(() => {});
+    }
   }
 }
 
@@ -1075,19 +1109,6 @@ function toNumberOrNull(value) {
 function truncate(text, max) {
   const t = String(text || '').trim();
   return t.length > max ? `${t.slice(0, max)}…` : t;
-}
-
-function coinsSourceLabel(source) {
-  return (
-    {
-      'desktop-bonus': 'extrato',
-      'desktop-checkin': 'extrato',
-      'mobile-modal': 'modal mobile',
-      'streak-estimate': 'estimativa pela sequência'
-    }[source] ||
-    source ||
-    ''
-  );
 }
 
 /**

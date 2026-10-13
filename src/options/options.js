@@ -2,6 +2,7 @@
  * Página de opções: credenciais, agendamento, tarefas, captcha, aparelho e extrato.
  */
 import { MSG } from '../common/constants.js';
+import { statusLabel, coinsSourceLabel, fmtNumber } from '../common/format.js';
 import {
   getSettings,
   saveSettings,
@@ -12,36 +13,9 @@ import {
 
 const $ = (id) => document.getElementById(id);
 
-function statusLabelPt(status) {
-  return (
-    {
-      success: 'sucesso',
-      partial: 'parcial',
-      error: 'erro',
-      stopped: 'cancelado',
-      blocked: 'bloqueado'
-    }[status] || status || 'desconhecido'
-  );
-}
-
-function sourceLabel(source) {
-  return (
-    {
-      'desktop-bonus': 'extrato',
-      'desktop-checkin': 'extrato',
-      'mobile-modal': 'modal mobile',
-      'streak-estimate': 'estimativa pela sequência'
-    }[source] || source || ''
-  );
-}
-
-function fmtNum(v) {
-  return Number.isFinite(v) ? String(v) : '—';
-}
-
 function runSummaryLine(run) {
   const when = run.startedAt ? new Date(run.startedAt).toLocaleString('pt-BR') : '—';
-  const bits = [when, statusLabelPt(run.status)];
+  const bits = [when, statusLabel(run.status)];
   if (run.checkin) {
     if (run.checkin.justCollected) bits.push(`check-in +${run.checkin.coins ?? '?'}`);
     else if (run.checkin.already) bits.push('check-in já coletado');
@@ -56,7 +30,7 @@ function runDetailLines(run) {
   const c = run.checkin;
   if (c) {
     if (c.justCollected) {
-      const src = c.coinsSource ? ` (${sourceLabel(c.coinsSource)})` : '';
+      const src = c.coinsSource ? ` (${coinsSourceLabel(c.coinsSource)})` : '';
       lines.push(`Check-in: +${c.coinsGainedToday ?? c.coins ?? '?'} moedas${src}`);
     } else if (c.already) {
       lines.push(
@@ -74,7 +48,7 @@ function runDetailLines(run) {
   }
   if (Number.isFinite(run.balanceBefore) || Number.isFinite(run.balanceAfter)) {
     const delta = Number.isFinite(run.gained) ? ` (${run.gained >= 0 ? '+' : ''}${run.gained} no período)` : '';
-    lines.push(`Saldo: ${fmtNum(run.balanceBefore)} → ${fmtNum(run.balanceAfter)}${delta}`);
+    lines.push(`Saldo: ${fmtNumber(run.balanceBefore)} → ${fmtNumber(run.balanceAfter)}${delta}`);
   }
   if (Number.isFinite(run.tasksGained)) {
     lines.push(`Tarefas (saldo): ${run.tasksGained >= 0 ? '+' : ''}${run.tasksGained} moedas`);
@@ -172,6 +146,7 @@ async function load() {
   $('keepWindowOpen').checked = s.keepWindowOpen !== false;
   $('silentMode').checked = Boolean(s.silentMode);
   $('notifications').checked = s.notifications !== false;
+  $('notifyOnlyOnChange').checked = Boolean(s.notifyOnlyOnChange);
 }
 
 function toInt(value, fallback) {
@@ -211,7 +186,8 @@ async function save() {
     customHeight: toInt($('customHeight').value, 915),
     keepWindowOpen: $('keepWindowOpen').checked,
     silentMode: $('silentMode').checked,
-    notifications: $('notifications').checked
+    notifications: $('notifications').checked,
+    notifyOnlyOnChange: $('notifyOnlyOnChange').checked
   };
 
   const password = $('password').value;

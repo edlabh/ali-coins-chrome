@@ -3,6 +3,7 @@
  */
 import { MSG, PHASE } from '../common/constants.js';
 import { formatClock, formatDuration } from '../common/schedule.js';
+import { statusLabel, coinsSourceLabel, fmtNumber } from '../common/format.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -113,7 +114,7 @@ async function refresh() {
     if (c) {
       const gained = Number.isFinite(c.coinsGainedToday) ? c.coinsGainedToday : c.coins;
       if (c.justCollected) {
-        const src = sourceLabel(c.coinsSource);
+        const src = coinsSourceLabel(c.coinsSource);
         lines.push(
           `Check-in: +${gained ?? '?'} moedas${src ? ` (${src})` : ''}${
             c.streak ? ` — sequência ${c.streak} dias` : ''
@@ -135,7 +136,7 @@ async function refresh() {
     }
     if (Number.isFinite(lastReport.balanceBefore) || Number.isFinite(lastReport.balanceAfter)) {
       lines.push(
-        `Saldo: ${fmt(lastReport.balanceBefore)} → ${fmt(lastReport.balanceAfter)}${
+        `Saldo: ${fmtNumber(lastReport.balanceBefore)} → ${fmtNumber(lastReport.balanceAfter)}${
           lastReport.gained !== null ? ` (${lastReport.gained >= 0 ? '+' : ''}${lastReport.gained} no período)` : ''
         }`
       );
@@ -172,33 +173,6 @@ async function refresh() {
   } else {
     reportCard.classList.add('hidden');
   }
-}
-
-function statusLabel(status) {
-  return (
-    {
-      success: 'sucesso',
-      partial: 'parcial',
-      error: 'erro',
-      stopped: 'cancelado',
-      blocked: 'bloqueado'
-    }[status] || status
-  );
-}
-
-function sourceLabel(source) {
-  return (
-    {
-      'desktop-bonus': 'extrato',
-      'desktop-checkin': 'extrato',
-      'mobile-modal': 'modal mobile',
-      'streak-estimate': 'estimativa pela sequência'
-    }[source] || ''
-  );
-}
-
-function fmt(v) {
-  return Number.isFinite(v) ? String(v) : '—';
 }
 
 $('btnRun').addEventListener('click', async () => {

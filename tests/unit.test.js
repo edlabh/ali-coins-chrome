@@ -10,6 +10,7 @@ import vm from 'node:vm';
 import path from 'node:path';
 
 import { computeNextRunAt, parseTimeOfDay, formatDuration, randInt } from '../src/common/schedule.js';
+import { statusLabel, coinsSourceLabel, fmtNumber } from '../src/common/format.js';
 import {
   pickNextTask,
   taskKey,
@@ -78,6 +79,24 @@ test('formatDuration e randInt funcionam como esperado', () => {
     const v = randInt(5, 10);
     assert.ok(v >= 5 && v <= 10);
   }
+});
+
+test('format: rótulos compartilhados (status, fonte do check-in, número)', () => {
+  assert.equal(statusLabel('success'), 'sucesso');
+  assert.equal(statusLabel('partial'), 'parcial');
+  assert.equal(statusLabel('blocked'), 'bloqueado');
+  assert.equal(statusLabel('desconhecido-status'), 'desconhecido-status');
+  assert.equal(statusLabel(null), 'desconhecido');
+
+  assert.equal(coinsSourceLabel('desktop-bonus'), 'extrato');
+  assert.equal(coinsSourceLabel('mobile-modal'), 'modal mobile');
+  assert.equal(coinsSourceLabel('streak-estimate'), 'estimativa pela sequência');
+  assert.equal(coinsSourceLabel(null), '');
+
+  assert.equal(fmtNumber(42), '42');
+  assert.equal(fmtNumber(0), '0');
+  assert.equal(fmtNumber(null), '—');
+  assert.equal(fmtNumber(NaN), '—');
 });
 
 // ---------------------------------------------------------------------------
