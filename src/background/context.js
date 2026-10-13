@@ -93,6 +93,11 @@ export async function sendCmd(ctx, tabId, type, payload = {}, { retries = 3 } = 
   throw err;
 }
 
+/** Indica erro de comando sem content script na aba (página fora do escopo). */
+export function isNoContentScriptError(err) {
+  return Boolean(err && err.noContentScript === true);
+}
+
 /** Envia um comando à aba principal (mobile) de execução. */
 export async function cmd(ctx, type, payload = {}, opts) {
   return sendCmd(ctx, ctx.tabId, type, payload, opts);

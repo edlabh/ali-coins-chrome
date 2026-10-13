@@ -11,6 +11,7 @@ import {
   RunAbortedError,
   appendLog,
   cmd,
+  isNoContentScriptError,
   isStopRequestedNow,
   sleepAbortable,
   updatePhase
@@ -24,6 +25,41 @@ import {
   isAliexpressUrl,
   waitPossibleNavigation
 } from './tabs.js';
+
+/**
+ * Recupera a execução quando a aba saiu de páginas com content script
+ * (interstitial anti-bot, link externo, reload lento): avisa no extrato, volta
+ * para a central de moedas e devolve null — o chamador continua o loop em vez
+ * de abortar o run inteiro.
+ */
+async function recoverToCoinPage(ctx, type) {
+  await appendLog(
+    ctx,
+    `Sem content script durante ${type} — a aba saiu do AliExpress; retornando à central (a execução continua).`
+  );
+  await ensureCoinPage(ctx, true);
+  return null;
+}
+
+/** commandWithCaptcha tolerante a páginas sem content script. */
+async function safeTaskCommand(ctx, type, payload = {}, label = '') {
+  try {
+    return await commandWithCaptcha(ctx, type, payload, label);
+  } catch (err) {
+    if (isNoContentScriptError(err)) return recoverToCoinPage(ctx, type);
+    throw err;
+  }
+}
+
+/** cmd tolerante a páginas sem content script. */
+async function safeTaskCmd(ctx, type, payload = {}) {
+  try {
+    return await cmd(ctx, type, payload, { retries: 2 });
+  } catch (err) {
+    if (isNoContentScriptError(err)) return recoverToCoinPage(ctx, type);
+    throw err;
+  }
+}
 
 /**
  * @param {object} ctx
@@ -40,15 +76,35 @@ export async function runTasksPhase(ctx) {
     if (await isStopRequestedNow()) throw new RunAbortedError();
 
     await ensureCoinPage(ctx, false);
-    const drawer = await commandWithCaptcha(ctx, CMD.OPEN_DRAWER, {}, 'drawer');
-    if (!drawer || !drawer.ok) {
-      const dbg = drawer && drawer.debug ? ` Diagnóstico: ${JSON.stringify(drawer.debug)}` : '';
+
+    // Guarda de navegação: a aba pode ter saído do AliExpress entre iterações
+    // (interstitial anti-bot/reload) — volta antes de tentar qualquer comando.
+    const urlNow = await getTabUrl(ctx.tabId);
+    if (urlNow && !isAliexpressUrl(urlNow)) {
+      await appendLog(ctx, `A aba saiu do AliExpress (${truncate(urlNow, 60)}) — retornando à central.`);
+      await ensureCoinPage(ctx, true);
+      await sleepAbortable(1500);
+      continue;
+    }
+
+    const drawer = await safeTaskCommand(ctx, CMD.OPEN_DRAWER, {}, 'drawer');
+    if (drawer === null) {
+      // Página sem content script: a central já foi reaberta — tenta de novo.
+      await sleepAbortable(1500);
+      continue;
+    }
+    if (!drawer.ok) {
+      const dbg = drawer.debug ? ` Diagnóstico: ${JSON.stringify(drawer.debug)}` : '';
       stats.errors.push(`Painel "Ganhe mais moedas" inacessível.${dbg}`.slice(0, 500));
       await appendLog(ctx, 'Falha ao abrir o painel de tarefas "Ganhe mais moedas".');
       break;
     }
 
-    const extraction = await commandWithCaptcha(ctx, CMD.EXTRACT_TASKS, {}, 'tasks');
+    const extraction = await safeTaskCommand(ctx, CMD.EXTRACT_TASKS, {}, 'tasks');
+    if (extraction === null) {
+      await sleepAbortable(1200);
+      continue;
+    }
     let tasks = (extraction && extraction.tasks) || [];
 
     // Primeira abertura do painel: os cards podem renderizar com atraso — faz
@@ -56,7 +112,11 @@ export async function runTasksPhase(ctx) {
     // a gaveta abrir, a extração achar 0 e o run encerrar sem executar tarefa).
     if (tasks.length === 0 && guard === 1) {
       await sleepAbortable(1500);
-      const retry = await commandWithCaptcha(ctx, CMD.EXTRACT_TASKS, {}, 'tasks');
+      const retry = await safeTaskCommand(ctx, CMD.EXTRACT_TASKS, {}, 'tasks');
+      if (retry === null) {
+        await sleepAbortable(1200);
+        continue;
+      }
       tasks = (retry && retry.tasks) || [];
     }
 
@@ -115,7 +175,14 @@ export async function runTasksPhase(ctx) {
     }
 
     if (next.action === 'claim') {
-      await cmd(ctx, CMD.CLICK_TASK, { index: next.index, title: next.title }, { retries: 2 });
+      const clicked = await safeTaskCmd(ctx, CMD.CLICK_TASK, {
+        index: next.index,
+        title: next.title
+      });
+      if (clicked === null) {
+        await sleepAbortable(1500);
+        continue;
+      }
       claimed.add(key);
       actions += 1;
       stats.tasks.push({ title: next.title, kind: 'claim', result: 'claimed' });
@@ -126,8 +193,15 @@ export async function runTasksPhase(ctx) {
 
     // action === 'run'
     await updatePhase(PHASE.TASKS, `Tarefa: ${truncate(next.title, 48)} (${next.kind})`);
-    await cmd(ctx, CMD.CLICK_TASK, { index: next.index, title: next.title }, { retries: 2 });
-    const navigated = await waitPossibleNavigation(ctx, 3500);
+    const clickedTask = await safeTaskCmd(ctx, CMD.CLICK_TASK, {
+      index: next.index,
+      title: next.title
+    });
+    if (clickedTask === null) {
+      await sleepAbortable(1500);
+      continue;
+    }
+    const navigated = await waitPossibleNavigation(ctx, 5000);
 
     // A tarefa pode abrir uma página FORA do AliExpress (webgame, loja de app,
     // link externo): sem content script ali, o comando falharia e abortaria o
@@ -152,24 +226,19 @@ export async function runTasksPhase(ctx) {
     }
 
     const seconds = next.scrollSeconds || settings.scrollSeconds;
-    let actionRes;
-    try {
-      actionRes = await commandWithCaptcha(
-        ctx,
-        CMD.RUN_ACTION,
-        { kind: next.kind, query: settings.searchQuery, seconds, navigated },
-        'action'
-      );
-    } catch (err) {
-      if (err && err.noContentScript) {
-        attempts[key] = (attempts[key] || 0) + 1;
-        actions += 1;
-        stats.tasks.push({ title: next.title, kind: next.kind, result: 'error' });
-        await appendLog(ctx, 'Página da tarefa fora do escopo do content script — retornando à central.');
-        await ensureCoinPage(ctx, true);
-        continue;
-      }
-      throw err;
+    const actionRes = await safeTaskCommand(
+      ctx,
+      CMD.RUN_ACTION,
+      { kind: next.kind, query: settings.searchQuery, seconds, navigated },
+      'action'
+    );
+    if (actionRes === null) {
+      // Página sem content script: conta a tentativa e segue (a central já
+      // foi reaberta pela recuperação).
+      attempts[key] = (attempts[key] || 0) + 1;
+      actions += 1;
+      stats.tasks.push({ title: next.title, kind: next.kind, result: 'error' });
+      continue;
     }
 
     attempts[key] = (attempts[key] || 0) + 1;
@@ -210,14 +279,17 @@ export async function runTasksPhase(ctx) {
   // Varredura final de resgates pendentes.
   for (let sweep = 0; sweep < 5; sweep += 1) {
     await ensureCoinPage(ctx, false);
-    const drawer = await commandWithCaptcha(ctx, CMD.OPEN_DRAWER, {}, 'drawer');
-    if (!drawer || !drawer.ok) break;
-    const extraction = await commandWithCaptcha(ctx, CMD.EXTRACT_TASKS, {}, 'tasks');
+    const drawer = await safeTaskCommand(ctx, CMD.OPEN_DRAWER, {}, 'drawer');
+    if (drawer === null) continue;
+    if (!drawer.ok) break;
+    const extraction = await safeTaskCommand(ctx, CMD.EXTRACT_TASKS, {}, 'tasks');
+    if (extraction === null) continue;
     const tasks = (extraction && extraction.tasks) || [];
     const claimables = tasks.filter((t) => t && t.isClaimable && !t.isDone && !claimed.has(taskKey(t)));
     if (claimables.length === 0) break;
     for (const t of claimables.slice(0, 3)) {
-      await cmd(ctx, CMD.CLICK_TASK, { index: t.index, title: t.title }, { retries: 2 });
+      const clicked = await safeTaskCmd(ctx, CMD.CLICK_TASK, { index: t.index, title: t.title });
+      if (clicked === null) break;
       claimed.add(taskKey(t));
       stats.tasks.push({ title: t.title, kind: 'claim', result: 'claimed' });
       await appendLog(ctx, `Resgate solicitado: ${truncate(t.title, 60)}.`);

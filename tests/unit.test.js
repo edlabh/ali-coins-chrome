@@ -20,7 +20,7 @@ import {
   SETTINGS_VERSION,
   shouldScheduleRetry
 } from '../src/common/state-utils.js';
-import { sendCmd } from '../src/background/context.js';
+import { sendCmd, isNoContentScriptError } from '../src/background/context.js';
 import {
   coinsFromStreak,
   streakFromCoins,
@@ -240,6 +240,8 @@ test('contexto: sem content script o erro é marcado para recuperação (noConte
     }
   };
   try {
+    assert.equal(isNoContentScriptError(new Error('x')), false);
+    assert.equal(isNoContentScriptError({ noContentScript: true }), true);
     await assert.rejects(
       sendCmd({ runId: 'r1' }, 1, 'PING', {}, { retries: 1 }),
       (err) => err.noContentScript === true && /PING/.test(err.message)
