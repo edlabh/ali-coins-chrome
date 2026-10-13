@@ -33,9 +33,11 @@
         case 'WAIT_2FA':
           return await AC.actions.wait2FA(payload);
         case 'DO_CHECKIN':
-          return await AC.actions.doCheckin();
+          return await AC.actions.doCheckin(payload);
         case 'READ_BALANCE':
           return AC.actions.readBalance();
+        case 'READ_MYCOIN':
+          return await AC.actions.readMycoin();
         case 'OPEN_DRAWER':
           return await AC.actions.openDrawer();
         case 'EXTRACT_TASKS':

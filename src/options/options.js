@@ -57,9 +57,15 @@ function runDetailLines(run) {
   if (c) {
     if (c.justCollected) {
       const src = c.coinsSource ? ` (${sourceLabel(c.coinsSource)})` : '';
-      lines.push(`Check-in: +${c.coins ?? '?'} moedas${src}`);
+      lines.push(`Check-in: +${c.coinsGainedToday ?? c.coins ?? '?'} moedas${src}`);
     } else if (c.already) {
-      lines.push('Check-in: já realizado hoje');
+      lines.push(
+        Number.isFinite(c.coinsGainedToday) && c.coinsGainedToday > 0
+          ? `Check-in: já realizado hoje — crédito no extrato: +${c.coinsGainedToday}`
+          : 'Check-in: já realizado hoje'
+      );
+    } else if (c.confirmedByLedger) {
+      lines.push(`Check-in: confirmado pelo extrato (+${c.coinsGainedToday ?? '?'} moedas)`);
     } else {
       lines.push('Check-in: não confirmado');
     }

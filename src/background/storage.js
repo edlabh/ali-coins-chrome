@@ -89,6 +89,8 @@ export async function getRuntime() {
     nextRunAt: null,
     blockedUntil: null,
     lastReadyAt: null,
+    lastStreak: null,
+    lastStreakAt: null,
     ...(data[RUNTIME_KEY] || {})
   };
 }

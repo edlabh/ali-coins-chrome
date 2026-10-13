@@ -18,6 +18,18 @@ import {
   migrateSettings,
   SETTINGS_VERSION
 } from '../src/common/state-utils.js';
+import {
+  coinsFromStreak,
+  streakFromCoins,
+  resolveCheckinCoins,
+  computeCheckinCoinsGained,
+  computeTasksCoinsGained,
+  isStreakBreak,
+  resolveStreakDays,
+  syncBalanceWithCheckin,
+  accountCheckin,
+  desktopStreakOf
+} from '../src/common/accounting.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
@@ -245,6 +257,7 @@ test('content scripts carregam em ordem sem erros e expõem AC.actions', () => {
   assert.ok(AC.selectors.tasks.taskItem);
   assert.equal(typeof AC.classifyTask, 'function');
   assert.equal(typeof AC.dom.clickHuman, 'function');
+  assert.equal(typeof AC.ledger.extractTodayLedger, 'function');
   assert.equal(typeof AC.actions.doLogin, 'function');
   assert.equal(typeof AC.actions.checkAuth, 'function');
   assert.equal(typeof AC.actions.doCheckin, 'function');
@@ -285,4 +298,354 @@ test('main-world spoofa navigator apenas na aba de execução', () => {
   assert.equal(sandbox.navigator.maxTouchPoints, 5);
   assert.equal(sandbox.navigator.userAgentData.mobile, true);
   assert.equal(sandbox.navigator.userAgentData.platform, 'Android');
+});
+
+// ---------------------------------------------------------------------------
+// Contabilidade — parser do extrato (ledger UMD) e funções puras (accounting)
+// Fixtures idênticos aos do projeto original (ali-coins tests/balance.test.js).
+// ---------------------------------------------------------------------------
+
+/** Avalia o arquivo UMD ledger.js como CommonJS para obter as funções. */
+function loadLedger() {
+  const code = readFileSync(path.join(root, 'src/content/ledger.js'), 'utf8');
+  const moduleObj = { exports: {} };
+  // eslint-disable-next-line no-new-func
+  const fn = new Function('module', 'exports', 'self', `${code}\nreturn module.exports;`);
+  return fn(moduleObj, moduleObj.exports, undefined);
+}
+
+test('ledger: extractTodayLedger soma Bônus diário e Missões de moedas (pt/en)', () => {
+  const { extractTodayLedger } = loadLedger();
+
+  const pt = `
+    20/09/2026 PT
+    Bônus diário
+    +1
+    Missões de moedas
+    +5
+    Missões de moedas
+    +5
+    Bônus diário
+    +40
+  `;
+  const ptRes = extractTodayLedger(pt);
+  assert.equal(ptRes.bonusCoins, 41);
+  assert.equal(ptRes.bonusCount, 2);
+  assert.equal(ptRes.missionsCoins, 10);
+  assert.equal(ptRes.missionsCount, 2);
+
+  const en = `
+    9/20/2026 PT
+    Daily bonus
+    +1
+    Coin missions
+    +15
+    Coin page task
+    +5
+  `;
+  const enRes = extractTodayLedger(en);
+  assert.equal(enRes.bonusCoins, 1);
+  assert.equal(enRes.missionsCoins, 20);
+
+  assert.deepEqual(extractTodayLedger(''), {
+    bonusCoins: null,
+    missionsCoins: 0,
+    bonusCount: 0,
+    missionsCount: 0
+  });
+});
+
+test('ledger: extrato real em inglês e Widget coins contam como tarefa', () => {
+  const { extractTodayLedger } = loadLedger();
+
+  const realEn =
+    'Coin page task\n+5\nCoin page task\n+5\nCoin page task\n+5\nCoin page task\n+5\nCoin page task\n+1\nApp daily check-in\n+40\n';
+  const res = extractTodayLedger(realEn);
+  assert.equal(res.bonusCoins, 40);
+  assert.equal(res.missionsCoins, 21);
+  assert.equal(res.missionsCount, 5);
+
+  let widget = '';
+  for (let i = 0; i < 13; i += 1) widget += 'Coin page task\n+5\n';
+  widget += 'Coin page task\n+1\n';
+  widget += 'Widget coins\n+5\n';
+  widget += 'App daily check-in\n+40\n';
+  const r = extractTodayLedger(widget);
+  assert.equal(r.bonusCoins, 40);
+  assert.equal(r.missionsCoins, 71);
+  assert.equal(r.missionsCount, 15);
+});
+
+test('ledger: streakFromHistory conta dias consecutivos (pt-BR e en-US)', () => {
+  const { streakFromHistory } = loadLedger();
+
+  const ptDateParts = (daysAgo) => {
+    const [y, m, d] = new Date()
+      .toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+      .split('-')
+      .map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d - daysAgo));
+    return { y: dt.getUTCFullYear(), m: dt.getUTCMonth() + 1, d: dt.getUTCDate() };
+  };
+  const ptBr = (daysAgo) => {
+    const { y, m, d } = ptDateParts(daysAgo);
+    return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;
+  };
+  const enUs = (daysAgo) => {
+    const { y, m, d } = ptDateParts(daysAgo);
+    return `${m}/${d}/${y}`;
+  };
+
+  const historyPtBr = `
+    Minhas moedas: 521
+    ${ptBr(0)} PT
+    Check-in diário no app
+    +40
+    ${ptBr(1)} PT
+    Check-in diário no app
+    +40
+    ${ptBr(2)} PT
+    Check-in diário no app
+    +40
+  `;
+  assert.equal(streakFromHistory(historyPtBr), 3);
+
+  const historyEnUs = `
+    My coins: 521
+    ${enUs(0)} PT
+    App daily check-in
+    +40
+    ${enUs(1)} PT
+    App daily check-in
+    +40
+    ${enUs(2)} PT
+    App daily check-in
+    +40
+    ${enUs(3)} PT
+    App daily check-in
+    +40
+  `;
+  assert.equal(streakFromHistory(historyEnUs), 4);
+
+  const historyWithGap = `
+    ${ptBr(0)} PT
+    Check-in diário no app
+    +40
+    ${ptBr(2)} PT
+    Check-in diário no app
+    +40
+  `;
+  assert.equal(streakFromHistory(historyWithGap), 1);
+
+  const staleHistory = `
+    ${ptBr(5)} PT
+    Check-in diário no app
+    +40
+    ${ptBr(6)} PT
+    Check-in diário no app
+    +40
+  `;
+  assert.equal(streakFromHistory(staleHistory), null);
+
+  assert.equal(streakFromHistory('Nenhum dado encontrado'), null);
+  assert.equal(streakFromHistory(''), null);
+  assert.equal(streakFromHistory(null), null);
+});
+
+test('ledger: parseBalance, todaySection e readMycoinPage compostos', () => {
+  const { parseBalance, todaySection, readMycoinPage } = loadLedger();
+
+  assert.equal(parseBalance('Minhas moedas\n2.917'), 2917);
+  assert.equal(parseBalance('My coins\n1,234'), 1234);
+  assert.equal(parseBalance('Minhas moedas\n521'), 521);
+  assert.equal(parseBalance('nada aqui'), null);
+
+  const hojeBr = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Los_Angeles' });
+  const hojeUs = new Date().toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles' });
+  const text = `
+    Minhas moedas
+    2917
+    ${hojeBr} PT
+    Bônus diário
+    +40
+    Missões de moedas
+    +56
+    01/01/2020 PT
+    Bônus diário
+    +1
+  `;
+
+  const section = todaySection(text);
+  assert.ok(section.includes('Bônus diário'));
+  assert.ok(section.includes('Missões de moedas'));
+  assert.ok(!section.includes('+1'), 'seção de hoje não deve vazar outro dia');
+
+  const read = readMycoinPage(text);
+  assert.equal(read.totalBalance, 2917);
+  assert.equal(read.hasCheckinToday, true);
+  assert.equal(read.todayBonusCoins, 40);
+  assert.equal(read.todayMissionsCoins, 56);
+  assert.equal(read.todayMissionsCount, 1);
+
+  // Formato en-US de hoje também resolve a seção.
+  const enText = `My coins\n100\n${hojeUs} PT\nApp daily check-in\n+40\n`;
+  assert.equal(readMycoinPage(enText).todayBonusCoins, 40);
+});
+
+test('accounting: tiers de moedas por dia de sequência', () => {
+  assert.equal(coinsFromStreak(1), 10);
+  assert.equal(coinsFromStreak(2), 15);
+  assert.equal(coinsFromStreak(7), 40);
+  assert.equal(coinsFromStreak(212), 40);
+  assert.equal(coinsFromStreak(null), 10);
+  assert.equal(streakFromCoins(10), 1);
+  assert.equal(streakFromCoins(40), 7);
+  assert.equal(streakFromCoins(22), null);
+});
+
+test('accounting: prioridade do valor do check-in (extrato > modal > estimativa)', () => {
+  assert.deepEqual(resolveCheckinCoins({ mobileCoins: 5, ledgerBonus: 40 }), {
+    coins: 40,
+    source: 'desktop-bonus'
+  });
+  assert.deepEqual(resolveCheckinCoins({ mobileCoins: 5 }), {
+    coins: 5,
+    source: 'mobile-modal'
+  });
+  assert.deepEqual(resolveCheckinCoins({ streak: 3, collected: true }), {
+    coins: 20,
+    source: 'streak-estimate'
+  });
+  assert.deepEqual(resolveCheckinCoins({ streak: 3, collected: false }), {
+    coins: null,
+    source: null
+  });
+});
+
+test('accounting: computeCheckinCoinsGained (port do relatório original)', () => {
+  assert.equal(
+    computeCheckinCoinsGained({ alreadyCollected: true, coinsGainedToday: '40', checkinCoinsFromLedger: true }),
+    40
+  );
+  assert.equal(computeCheckinCoinsGained({ alreadyCollected: true, coinsGainedToday: '0' }), 0);
+  assert.equal(computeCheckinCoinsGained({ alreadyCollected: false, coinsGainedToday: '0' }), 0);
+  assert.equal(
+    computeCheckinCoinsGained({ alreadyCollected: false, coinsGainedToday: 'N/D', streakDays: 7 }),
+    40
+  );
+  assert.equal(computeCheckinCoinsGained({ alreadyCollected: false, coinsGainedToday: '40' }), 40);
+});
+
+test('accounting: computeTasksCoinsGained desconta check-in pré-crédito (legado)', () => {
+  assert.equal(
+    computeTasksCoinsGained({ coinsGained: 56, initialBalance: 1000, coinsFromLedger: true }, null),
+    56
+  );
+  assert.equal(
+    computeTasksCoinsGained(
+      { coinsGained: 96, initialBalance: 1000 },
+      { alreadyCollected: false, coinsGainedToday: '40', totalBalance: 1040 }
+    ),
+    56
+  );
+  assert.equal(
+    computeTasksCoinsGained(
+      { coinsGained: 96, initialBalance: 1040 },
+      { alreadyCollected: false, coinsGainedToday: '40', totalBalance: 1040 }
+    ),
+    96
+  );
+});
+
+test('accounting: isStreakBreak detecta quebra e ignora leituras do ciclo semanal', () => {
+  assert.equal(isStreakBreak(1, 212, false), true);
+  assert.equal(isStreakBreak(7, 212, false), false);
+  assert.equal(isStreakBreak(1, 212, true), false);
+  assert.equal(isStreakBreak(50, 49, false), false);
+  assert.equal(isStreakBreak(1, 1, false), false);
+});
+
+test('accounting: resolveStreakDays (incremento, preservação e extrato)', () => {
+  assert.equal(resolveStreakDays({ detectedStreak: null, previousStreakDays: 5, justCollected: true }).streakDays, 6);
+  assert.equal(resolveStreakDays({ detectedStreak: 9, previousStreakDays: 5, justCollected: true }).streakDays, 9);
+  assert.equal(resolveStreakDays({ detectedStreak: 3, previousStreakDays: 5, alreadyCollected: true }).streakDays, 5);
+  assert.equal(resolveStreakDays({ detectedStreak: 3, previousStreakDays: 212, justCollected: true }).streakDays, 213);
+  assert.equal(resolveStreakDays({ detectedStreak: 1, previousStreakDays: 50, statementStreak: 10 }).streakDays, 10);
+  assert.equal(resolveStreakDays({ detectedStreak: null, previousStreakDays: null, justCollected: true }).streakDays, 1);
+});
+
+test('accounting: syncBalanceWithCheckin compensa extrato defasado', () => {
+  assert.deepEqual(
+    syncBalanceWithCheckin({ balance: 1000, earlyBalance: 1000, checkinCoins: 40, justCollected: true }),
+    { balance: 1040, adjusted: true }
+  );
+  assert.deepEqual(
+    syncBalanceWithCheckin({ balance: 1040, earlyBalance: 1000, checkinCoins: 40, justCollected: true }),
+    { balance: 1040, adjusted: false }
+  );
+  assert.deepEqual(
+    syncBalanceWithCheckin({ balance: 1000, checkinCoins: 40, justCollected: false }),
+    { balance: 1000, adjusted: false }
+  );
+});
+
+test('accounting: desktopStreakOf (texto > histórico > tier)', () => {
+  assert.equal(desktopStreakOf({ textStreak: 5, historyStreak: 3, todayBonusCoins: 15 }), 5);
+  assert.equal(desktopStreakOf({ textStreak: null, historyStreak: 12, todayBonusCoins: 40 }), 12);
+  assert.equal(desktopStreakOf({ textStreak: null, historyStreak: null, todayBonusCoins: 15 }), 2);
+  assert.equal(desktopStreakOf(null), null);
+});
+
+test('accounting: accountCheckin consolida extrato + mobile (já coletado e coleta nova)', () => {
+  // Cenário A: check-in já coletado (crédito de +40 no extrato do dia).
+  const a = accountCheckin({
+    mobileCheckin: { already: true, justCollected: false, coins: null, streak: null, balance: null },
+    earlyLedger: {
+      totalBalance: 1000,
+      hasCheckinToday: true,
+      todayBonusCoins: 40,
+      todayMissionsCoins: 56,
+      textStreak: null,
+      historyStreak: 12
+    },
+    postLedger: {
+      totalBalance: 1000,
+      hasCheckinToday: true,
+      todayBonusCoins: 40,
+      todayMissionsCoins: 56,
+      textStreak: null,
+      historyStreak: 12
+    },
+    previousStreakDays: 12
+  });
+  assert.equal(a.alreadyCollected, true);
+  assert.equal(a.coinsGainedToday, 40, 'crédito do extrato conta mesmo já coletado');
+  assert.equal(a.coinsSource, 'desktop-bonus');
+  assert.equal(a.streakDays, 12);
+  assert.equal(a.streakBroken, false);
+  assert.equal(a.missionsCoins, 56);
+
+  // Cenário B: coleta nova — modal mobile +15 e extrato defasado (saldo sincronizado).
+  const b = accountCheckin({
+    mobileCheckin: { already: false, justCollected: true, coins: 15, streak: 2, balance: 1000 },
+    earlyLedger: {
+      totalBalance: 1000,
+      hasCheckinToday: false,
+      todayBonusCoins: null,
+      todayMissionsCoins: 0
+    },
+    postLedger: {
+      totalBalance: 1000,
+      hasCheckinToday: false,
+      todayBonusCoins: null,
+      todayMissionsCoins: 0
+    },
+    previousStreakDays: 1
+  });
+  assert.equal(b.justCollected, true);
+  assert.equal(b.coins, 15);
+  assert.equal(b.coinsSource, 'mobile-modal');
+  assert.equal(b.streakDays, 2);
+  assert.equal(b.balanceAfterCheckin, 1015);
+  assert.equal(b.balanceAdjusted, true);
 });

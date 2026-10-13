@@ -6,6 +6,8 @@
 
 export const COIN_URL = 'https://m.aliexpress.com/p/coin-index/index.html';
 export const COIN_URL_TASKS = `${COIN_URL}?_immersiveMode=true&from=pc302`;
+/** Extrato desktop de moedas (página mycoin) — fonte de verdade da contabilidade. */
+export const MYCOIN_URL = 'https://www.aliexpress.com/p/coin-pc-index/mycoin.html';
 
 /** Presets de emulação. width/height = viewport CSS (sem decoração da janela). */
 export const DEVICE_PRESETS = {
@@ -42,6 +44,7 @@ export const CMD = Object.freeze({
   WAIT_2FA: 'WAIT_2FA',
   DO_CHECKIN: 'DO_CHECKIN',
   READ_BALANCE: 'READ_BALANCE',
+  READ_MYCOIN: 'READ_MYCOIN',
   OPEN_DRAWER: 'OPEN_DRAWER',
   EXTRACT_TASKS: 'EXTRACT_TASKS',
   CLICK_TASK: 'CLICK_TASK',

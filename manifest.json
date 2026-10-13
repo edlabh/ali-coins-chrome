@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Ali Coins Chrome — Check-in e Tarefas AliExpress",
   "short_name": "Ali Coins",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Emula um Pixel 8, faz login no AliExpress, realiza o check-in diário de moedas e executa as tarefas 'Ganhe mais moedas'. Aceita agendamento diário ou execução ao abrir o Chrome, e pausa para o usuário resolver captchas.",
   "minimum_chrome_version": "116",
   "icons": {
@@ -47,6 +47,7 @@
       "js": [
         "src/content/selectors.js",
         "src/content/task-classify.js",
+        "src/content/ledger.js",
         "src/content/dom.js",
         "src/content/actions.js",
         "src/content/bridge.js"

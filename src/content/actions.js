@@ -223,7 +223,7 @@
     return { balance: null, raw: null };
   }
 
-  async function doCheckin() {
+  async function doCheckin(options = {}) {
     if (captchaInfo().present) return { needsCaptcha: true };
 
     // Salvaguarda: se a sessão expirou entre a verificação de auth e o check-in,
@@ -236,7 +236,11 @@
     closeModals();
     await sleep(300);
 
-    const already = todayChecked();
+    // `assumeCollected`: o extrato desktop já indicava o check-in de hoje — não
+    // clica de novo (paridade com o wasAlreadyCollectedToday do ali-coins).
+    const assumeCollected = options.assumeCollected === true;
+    const alreadyUi = todayChecked();
+    const already = assumeCollected || alreadyUi;
     let justCollected = false;
 
     if (!already) {
@@ -306,6 +310,8 @@
     const balance = readBalance();
     return {
       already: already && !justCollected,
+      assumed: assumeCollected,
+      alreadyUi,
       justCollected,
       coins,
       streak,
@@ -313,6 +319,32 @@
       balance: balance.balance,
       balanceRaw: balance.raw
     };
+  }
+
+  /**
+   * Lê o extrato desktop (página mycoin) — fonte de verdade da contabilidade.
+   * Aguarda a hidratação e delega o parsing para AC.ledger (puro e testável).
+   * Executa na ABA DO EXTRATO (UA desktop), não na aba mobile.
+   * @returns {Promise<object>}
+   */
+  async function readMycoin() {
+    if (!/mycoin|coin-pc-index/i.test(location.href)) {
+      return { error: 'not-mycoin-page' };
+    }
+
+    // Página pedindo login (sessão inválida): não há extrato para ler.
+    if (loginFormState().password && !/My coins|Minhas moedas/i.test(bodyText(4000))) {
+      return { loginPrompt: true };
+    }
+
+    // Aguarda o SPA desktop hidratar (saldo ou rótulo de check-in visível no texto).
+    await waitUntil(
+      () => /My coins|Minhas moedas|App daily check-in|B[ôo]nus di[áa]rio/i.test(bodyText(20000)),
+      { timeout: 15000, interval: 500 }
+    );
+    await sleep(600);
+
+    return AC.ledger.readMycoinPage(bodyText(150000));
   }
 
   // ---------------------------------------------------------------------------
@@ -635,6 +667,7 @@
     waitCaptcha,
     wait2FA,
     doCheckin,
+    readMycoin,
     readBalance: () => ({ ...readBalance(), streak: readStreak(), todayChecked: todayChecked() }),
     openDrawer,
     extractTasks,

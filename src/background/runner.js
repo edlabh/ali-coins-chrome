@@ -9,7 +9,7 @@
  * Fluxo: auth -> checkin -> tasks -> finalize, com gate de captcha em qualquer passo.
  */
 
-import { CMD, COIN_URL_TASKS, PHASE, RUN_LOG_LIMIT, RUN_STATUS } from '../common/constants.js';
+import { CMD, COIN_URL_TASKS, MYCOIN_URL, PHASE, RUN_LOG_LIMIT, RUN_STATUS } from '../common/constants.js';
 import { formatDuration, randInt } from '../common/schedule.js';
 import {
   buildReport,
@@ -17,6 +17,11 @@ import {
   summarizeTasks,
   taskKey
 } from '../common/state-utils.js';
+import {
+  accountCheckin,
+  computeTasksCoinsGained,
+  desktopStreakOf
+} from '../common/accounting.js';
 import {
   getPassword,
   getRunState,
@@ -29,7 +34,9 @@ import {
 import {
   applyDeviceRules,
   clearDeviceRules,
+  closeLedgerTab,
   closeOrphanTabs,
+  ensureLedgerTab,
   focusWindow,
   isCoinUrl,
   navigateTab,
@@ -37,7 +44,7 @@ import {
   sleep,
   waitTabComplete
 } from './tabs.js';
-import { notifyCaptcha, notifyResult, setBadge } from './notify.js';
+import { notify, notifyCaptcha, notifyResult, setBadge } from './notify.js';
 
 const KEEPALIVE_MS = 20000;
 let keepAliveTimer = null;
@@ -186,60 +193,187 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
       await ensureCoinPage(ctx, true);
     }
 
+    // 2.5 Contabilidade: leitura inicial do extrato desktop (página mycoin).
+    // Espelha o ali-coins: só com sessão pré-existente; serve para saber se o
+    // check-in de hoje JÁ foi creditado (evita clique duplo) e para o baseline.
+    let earlyLedger = null;
+    if (auth.already) {
+      await updatePhase(PHASE.CHECKIN, 'Lendo o extrato de moedas…');
+      earlyLedger = await readLedger(ctx, 'leitura inicial');
+    } else {
+      await appendLog(ctx, 'Extrato inicial dispensado (sessão recém-autenticada).');
+    }
+    const assumeCollected = Boolean(earlyLedger && earlyLedger.hasCheckinToday);
+
     // 3. Check-in (com auto-cura: se a sessão caiu, autentica e tenta de novo)
     await updatePhase(PHASE.CHECKIN, 'Realizando check-in diário…');
-    checkin = await commandWithCaptcha(ctx, CMD.DO_CHECKIN, {}, 'checkin');
+    checkin = await commandWithCaptcha(ctx, CMD.DO_CHECKIN, { assumeCollected }, 'checkin');
     if (checkin && checkin.needsLogin) {
       await appendLog(ctx, 'A sessão expirou durante o check-in — autenticando e repetindo.');
       const retryAuth = await ensureAuthenticated(ctx);
       if (!retryAuth.ok) throw new Error(retryAuth.error || 'Falha de autenticação.');
       await ensureCoinPage(ctx, true);
-      checkin = await commandWithCaptcha(ctx, CMD.DO_CHECKIN, {}, 'checkin');
+      checkin = await commandWithCaptcha(ctx, CMD.DO_CHECKIN, { assumeCollected }, 'checkin');
     }
-    ctx.balanceBefore = toNumberOrNull(checkin.balance);
 
-    if (checkin.justCollected) {
+    // Contabilidade pós check-in: refaz a leitura do extrato quando houve coleta
+    // (crédito real, missões do dia e sequência); senão reaproveita a inicial
+    // (shouldReuseEarlyDesktop do ali-coins).
+    const mobileCheckin = {
+      already: Boolean(checkin.already),
+      justCollected: Boolean(checkin.justCollected),
+      coins: checkin.coins ?? null,
+      streak: checkin.streak ?? null,
+      balance: toNumberOrNull(checkin.balance)
+    };
+
+    let postLedger = earlyLedger;
+    if (mobileCheckin.justCollected || !earlyLedger || earlyLedger.totalBalance === null) {
+      postLedger = await readLedger(ctx, 'pós check-in');
+    } else {
+      await appendLog(ctx, 'Extrato reaproveitado da leitura inicial (nada coletado neste run).');
+    }
+
+    const runtimeState = await getRuntime();
+    const previousStreak = Number.isFinite(runtimeState.lastStreak) ? runtimeState.lastStreak : null;
+
+    const acct = accountCheckin({
+      mobileCheckin,
+      earlyLedger,
+      postLedger,
+      previousStreakDays: previousStreak,
+      assumeCollected
+    });
+
+    // Saldo "antes" (pré-crédito do check-in) e saldo base das tarefas.
+    ctx.balanceBefore = earlyLedger?.totalBalance ?? null;
+    const initialBalanceForTasks =
+      acct.balanceAfterCheckin ?? mobileCheckin.balance ?? ctx.balanceBefore;
+
+    if (acct.justCollected) {
+      const src = acct.coinsSource ? ` (${coinsSourceLabel(acct.coinsSource)})` : '';
       await appendLog(
         ctx,
-        `Check-in realizado: +${checkin.coins ?? '?'} moedas${
-          checkin.streak ? ` (sequência de ${checkin.streak} dias)` : ''
+        `Check-in realizado: +${acct.coins ?? '?'} moedas${src}${
+          typeof acct.streakDays === 'number' ? ` — sequência de ${acct.streakDays} dias` : ''
         }.`
       );
-    } else if (checkin.already) {
-      await appendLog(ctx, 'Check-in: já havia sido coletado hoje — nenhuma moeda nova de check-in.');
+    } else if (acct.alreadyCollected) {
+      await appendLog(
+        ctx,
+        acct.coinsGainedToday > 0
+          ? `Check-in: já coletado hoje — crédito do dia no extrato: +${acct.coinsGainedToday} moedas.`
+          : 'Check-in: já coletado hoje — nenhuma moeda nova de check-in.'
+      );
+    } else if (acct.confirmedByLedger) {
+      await appendLog(ctx, `Check-in confirmado pelo extrato: +${acct.coinsGainedToday} moedas.`);
     } else {
-      await appendLog(ctx, 'Check-in: clique não confirmado pela UI (veja o extrato).');
+      await appendLog(ctx, 'Check-in: clique não confirmado pela UI nem pelo extrato.');
+    }
+    if (acct.balanceAdjusted) {
+      await appendLog(ctx, 'Saldo sincronizado com o crédito do check-in (extrato defasado).');
+    }
+    if (typeof acct.streakDays === 'number') {
+      await appendLog(ctx, `Sequência de check-in: ${acct.streakDays} dias.`);
+    }
+    if (acct.streakBroken) {
+      await appendLog(
+        ctx,
+        `🚨 Sequência de check-in quebrada: era ${previousStreak} dias e hoje voltou a ${acct.streakDays}.`
+      );
+      await notify(ctx.settings, {
+        id: 'ali-coins-streak',
+        title: 'Ali Coins: sequência de check-in quebrada',
+        message: `A sequência foi interrompida: ontem com ${previousStreak} dias, hoje em ${acct.streakDays}.`,
+        requireInteraction: true
+      });
     }
     if (ctx.balanceBefore !== null) {
-      await appendLog(ctx, `Saldo atual: ${ctx.balanceBefore} moedas.`);
+      await appendLog(ctx, `Saldo no extrato (antes do crédito do dia): ${ctx.balanceBefore} moedas.`);
     }
+
+    // Persiste a sequência consolidada para a detecção de quebra no próximo run.
+    if (typeof acct.streakDays === 'number') {
+      await patchRuntime({ lastStreak: acct.streakDays, lastStreakAt: Date.now() });
+    }
+
+    checkin = {
+      already: acct.alreadyCollected,
+      justCollected: acct.justCollected,
+      confirmedByLedger: acct.confirmedByLedger,
+      coins: acct.coins,
+      coinsSource: acct.coinsSource,
+      coinsGainedToday: acct.coinsGainedToday,
+      checkinCoinsFromLedger: acct.checkinCoinsFromLedger,
+      streak: typeof acct.streakDays === 'number' ? acct.streakDays : mobileCheckin.streak,
+      streakBroken: acct.streakBroken,
+      balance: acct.balanceAfterCheckin,
+      totalBalance: acct.balanceAfterCheckin
+    };
 
     await patchRunState({
       stats: { ...stats },
       checkin: {
-        already: Boolean(checkin.already),
-        justCollected: Boolean(checkin.justCollected),
-        coins: checkin.coins ?? null
+        already: checkin.already,
+        justCollected: checkin.justCollected,
+        coins: checkin.coinsGainedToday > 0 ? checkin.coinsGainedToday : checkin.coins
       }
     });
 
     // 4. Tarefas
     await updatePhase(PHASE.TASKS, 'Executando tarefas "Ganhe mais moedas"…');
     await runTasksPhase(ctx);
-    await closeOrphanTabs(ctx.windowId, ctx.tabId).catch(() => {});
+    await closeOrphanTabs(ctx.windowId, ctx.tabId, ctx.ledgerTabId ? [ctx.ledgerTabId] : []).catch(
+      () => {}
+    );
 
-    // 5. Saldo final
-    await updatePhase(PHASE.FINALIZING, 'Lendo saldo final…');
-    await ensureCoinPage(ctx, true);
-    const balanceRead = await commandWithCaptcha(ctx, CMD.READ_BALANCE, {}, 'balance');
-    const balanceAfter = toNumberOrNull(balanceRead.balance);
+    // 5. Contabilidade final: extrato desktop de novo (fallback: saldo mobile).
+    await updatePhase(PHASE.FINALIZING, 'Lendo extrato final…');
+    const finalLedger = await readLedger(ctx, 'saldo final');
+    let balanceAfter = finalLedger?.totalBalance ?? null;
+    if (balanceAfter === null) {
+      await ensureCoinPage(ctx, true);
+      const balanceRead = await commandWithCaptcha(ctx, CMD.READ_BALANCE, {}, 'balance');
+      balanceAfter = toNumberOrNull(balanceRead.balance);
+      await appendLog(ctx, 'Saldo final lido na página mobile (extrato indisponível).');
+    }
+
+    // Ganho de tarefas: delta de saldo (base pós-checkin, como o ali-coins), com a
+    // guarda legada de saldo capturado antes do crédito do check-in.
+    let tasksGained = null;
+    if (Number.isFinite(balanceAfter) && Number.isFinite(initialBalanceForTasks)) {
+      const rawTasksGained = balanceAfter - initialBalanceForTasks;
+      tasksGained = computeTasksCoinsGained(
+        { coinsGained: rawTasksGained, initialBalance: initialBalanceForTasks, coinsFromLedger: false },
+        checkin
+      );
+    }
+
+    // Missões de moedas do extrato (soma das tarefas do dia) e delta neste run.
+    const ledgerSummary =
+      finalLedger && Number.isFinite(finalLedger.todayMissionsCoins)
+        ? {
+            missionsCoins: finalLedger.todayMissionsCoins,
+            missionsCount: finalLedger.todayMissionsCount ?? null,
+            missionsGained:
+              postLedger && Number.isFinite(postLedger.todayMissionsCoins)
+                ? Math.max(0, finalLedger.todayMissionsCoins - postLedger.todayMissionsCoins)
+                : null,
+            desktopStreak: desktopStreakOf(finalLedger)
+          }
+        : null;
 
     if (balanceAfter !== null) {
       const delta =
-        ctx.balanceBefore !== null ? ` (${balanceAfter - ctx.balanceBefore >= 0 ? '+' : ''}${balanceAfter - ctx.balanceBefore} neste run)` : '';
+        ctx.balanceBefore !== null
+          ? ` (${balanceAfter - ctx.balanceBefore >= 0 ? '+' : ''}${balanceAfter - ctx.balanceBefore} no run)`
+          : '';
       await appendLog(ctx, `Saldo final: ${balanceAfter} moedas${delta}.`);
     } else {
-      await appendLog(ctx, 'Saldo final não disponível na página (N/D).');
+      await appendLog(ctx, 'Saldo final não disponível (N/D).');
+    }
+    if (tasksGained !== null) {
+      await appendLog(ctx, `Tarefas (delta de saldo): ${tasksGained >= 0 ? '+' : ''}${tasksGained} moedas.`);
     }
 
     if (stats.errors.length > 0) status = RUN_STATUS.PARTIAL;
@@ -260,6 +394,8 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
       captchaEvents: stats.captchaEvents,
       log: ctx.log
     });
+    report.tasksGained = tasksGained;
+    report.ledger = ledgerSummary;
     await finalize(report, settings, true);
     return { started: true };
   } catch (err) {
@@ -305,9 +441,11 @@ async function applyWindowPolicy(ctx, settings) {
   if (!ctx.windowId) return;
   if (settings.keepWindowOpen) {
     await appendLog(ctx, 'Janela mobile mantida aberta (configuração).');
+    await closeLedgerTab();
     return;
   }
   await appendLog(ctx, 'Concluído — fechando a janela mobile.');
+  await closeLedgerTab();
   await chrome.windows.remove(ctx.windowId).catch(() => {});
   await clearDeviceRules().catch(() => {});
 }
@@ -651,7 +789,9 @@ async function runTasksPhase(ctx) {
     await patchRunState({ stats: { ...stats } });
 
     await ensureCoinPage(ctx, false);
-    await closeOrphanTabs(ctx.windowId, ctx.tabId).catch(() => {});
+    await closeOrphanTabs(ctx.windowId, ctx.tabId, ctx.ledgerTabId ? [ctx.ledgerTabId] : []).catch(
+      () => {}
+    );
 
     // Pausa aleatória entre tarefas (anti-detecção), como TASK_PAUSE_* do ali-coins.
     const pause = randInt(settings.pauseBetweenTasksMinMs, settings.pauseBetweenTasksMaxMs);
@@ -718,12 +858,12 @@ async function ensureCoinPage(ctx, force = false) {
   }
 }
 
-/** Envia um comando ao content script com retries (aguardando o script ficar pronto). */
-async function cmd(ctx, type, payload = {}, { retries = 3 } = {}) {
+/** Envia um comando a uma aba específica com retries (aguardando o content script). */
+async function sendCmd(ctx, tabId, type, payload = {}, { retries = 3 } = {}) {
   let lastErr = null;
   for (let i = 0; i < retries; i += 1) {
     try {
-      const res = await chrome.tabs.sendMessage(ctx.tabId, {
+      const res = await chrome.tabs.sendMessage(tabId, {
         type,
         payload: { ...payload, runId: ctx.runId }
       });
@@ -737,6 +877,43 @@ async function cmd(ctx, type, payload = {}, { retries = 3 } = {}) {
   throw new Error(
     `Sem resposta do content script para ${type}: ${lastErr ? lastErr.message : 'desconhecido'}`
   );
+}
+
+/** Envia um comando à aba principal (mobile) de execução. */
+async function cmd(ctx, type, payload = {}, opts) {
+  return sendCmd(ctx, ctx.tabId, type, payload, opts);
+}
+
+/**
+ * Lê o extrato desktop (página mycoin) na aba do extrato — best-effort.
+ * Espelha o getBalanceDesktop do ali-coins: navega SEMPRE para a página mycoin
+ * e extrai saldo + extrato do dia + streak. Falhas não derrubam o run.
+ * @param {object} ctx
+ * @param {string} label rótulo para o log ("leitura inicial", "pós check-in"...)
+ * @returns {Promise<object|null>}
+ */
+async function readLedger(ctx, label) {
+  try {
+    const ledgerTabId = await ensureLedgerTab(ctx.windowId);
+    ctx.ledgerTabId = ledgerTabId;
+    await navigateTab(ledgerTabId, MYCOIN_URL, 45000);
+
+    const res = await sendCmd(ctx, ledgerTabId, CMD.READ_MYCOIN, {}, { retries: 4 });
+    if (!res || res.error || res.loginPrompt) {
+      const reason = res && res.loginPrompt ? 'página pediu login' : (res && res.error) || 'sem resposta';
+      await appendLog(ctx, `Extrato indisponível (${label}): ${reason}.`);
+      return null;
+    }
+
+    const bits = [`saldo ${res.totalBalance ?? 'N/D'}`];
+    if (Number.isFinite(res.todayMissionsCoins)) bits.push(`missões de hoje +${res.todayMissionsCoins}`);
+    if (res.hasCheckinToday) bits.push('check-in de hoje creditado no extrato');
+    await appendLog(ctx, `Extrato (${label}): ${bits.join(', ')}.`);
+    return res;
+  } catch (err) {
+    await appendLog(ctx, `Falha ao ler o extrato (${label}): ${err.message}.`);
+    return null;
+  }
 }
 
 async function updatePhase(phase, message) {
@@ -768,6 +945,19 @@ function toNumberOrNull(value) {
 function truncate(text, max) {
   const t = String(text || '').trim();
   return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
+function coinsSourceLabel(source) {
+  return (
+    {
+      'desktop-bonus': 'extrato',
+      'desktop-checkin': 'extrato',
+      'mobile-modal': 'modal mobile',
+      'streak-estimate': 'estimativa pela sequência'
+    }[source] ||
+    source ||
+    ''
+  );
 }
 
 /**

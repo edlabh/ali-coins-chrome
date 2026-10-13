@@ -74,6 +74,7 @@ janela Pixel 8 → m.aliexpress.com/coin-index
 | Check-in | `#signButton` + confirmação + streak | idêntico (mesmos seletores/fallbacks) |
 | Tarefas | surpresa/busca/scroll/resgate, gaveta `.e2e_task` | idêntico (mesma classificação e limites) |
 | Captcha | tenta deslizar automaticamente | pausa e aguarda o usuário resolver (por design) |
+| Contabilidade | extrato desktop (mycoin): saldo, Bônus diário, Missões de moedas | idêntica — aba desktop dedicada, mesmo parser e prioridades |
 | Risco RGV587 | cooldown 48h + fail-fast | cooldown configurável (padrão 48h) |
 | Agendamento | cron/Task Scheduler externo | `chrome.alarms` interno + execução ao abrir o Chrome |
 | Sessão | storageState criptografado (AES-GCM v3) | cookies do próprio perfil do Chrome (persistente) |
@@ -114,6 +115,13 @@ Decisões de projeto relevantes:
   spoofa `navigator.userAgent`/`userAgentData`/`maxTouchPoints` apenas na aba de
   execução. A janela é criada em `about:blank` e só navega **depois** das regras
   ativas, garantindo que o primeiro carregamento já renderize a variante mobile.
+- **Contabilidade fiel ao ali-coins**: o saldo e o extrato do dia vêm da página
+  desktop `mycoin` (aberta em uma **aba desktop dedicada**, sem as regras de UA mobile).
+  O parser usa o fuso **America/Los_Angeles** (o "dia" contábil do AliExpress), separa
+  **Bônus diário** (check-in) de **Missões de moedas** (tarefas), prioriza o valor real
+  do extrato > modal mobile > estimativa pela sequência, compensa o saldo quando o
+  crédito do check-in ainda não apareceu e calcula o ganho das tarefas pelo **delta de
+  saldo**. Sequência quebrada gera alerta (log + notificação + extrato).
 - **Captcha**: a resolução é sempre manual (a extensão não tenta deslizar o desafio).
   Detecção por `#nc_1_n1z`, `.btn_slide`, containers `nocaptcha`/`baxia` e iframes.
 - **Tarefas de app** (Prize Land, minigames, quizzes, avaliações) são ignoradas por padrão,

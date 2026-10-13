@@ -111,12 +111,42 @@ async function refresh() {
     const lines = [];
     const c = lastReport.checkin;
     if (c) {
-      if (c.justCollected) lines.push(`Check-in: +${c.coins ?? '?'} moedas${c.streak ? ` (sequência ${c.streak} dias)` : ''}`);
-      else if (c.already) lines.push('Check-in: já realizado hoje (nenhuma moeda nova)');
-      else lines.push('Check-in: não confirmado');
+      const gained = Number.isFinite(c.coinsGainedToday) ? c.coinsGainedToday : c.coins;
+      if (c.justCollected) {
+        const src = sourceLabel(c.coinsSource);
+        lines.push(
+          `Check-in: +${gained ?? '?'} moedas${src ? ` (${src})` : ''}${
+            c.streak ? ` — sequência ${c.streak} dias` : ''
+          }`
+        );
+      } else if (c.already) {
+        lines.push(
+          Number.isFinite(c.coinsGainedToday) && c.coinsGainedToday > 0
+            ? `Check-in: já realizado hoje — crédito do dia no extrato: +${c.coinsGainedToday}`
+            : 'Check-in: já realizado hoje (nenhuma moeda nova)'
+        );
+        if (c.streak) lines.push(`Sequência: ${c.streak} dias`);
+      } else if (c.confirmedByLedger) {
+        lines.push(`Check-in: confirmado pelo extrato (+${c.coinsGainedToday ?? '?'} moedas)`);
+      } else {
+        lines.push('Check-in: não confirmado');
+      }
+      if (c.streakBroken) lines.push('🚨 Sequência de check-in quebrada neste run');
     }
     if (Number.isFinite(lastReport.balanceBefore) || Number.isFinite(lastReport.balanceAfter)) {
-      lines.push(`Saldo: ${fmt(lastReport.balanceBefore)} → ${fmt(lastReport.balanceAfter)}${lastReport.gained !== null ? ` (${lastReport.gained >= 0 ? '+' : ''}${lastReport.gained})` : ''}`);
+      lines.push(
+        `Saldo: ${fmt(lastReport.balanceBefore)} → ${fmt(lastReport.balanceAfter)}${
+          lastReport.gained !== null ? ` (${lastReport.gained >= 0 ? '+' : ''}${lastReport.gained} no período)` : ''
+        }`
+      );
+    }
+    if (Number.isFinite(lastReport.tasksGained)) {
+      lines.push(
+        `Tarefas (delta de saldo): ${lastReport.tasksGained >= 0 ? '+' : ''}${lastReport.tasksGained} moedas`
+      );
+    }
+    if (lastReport.ledger && Number.isFinite(lastReport.ledger.missionsCoins)) {
+      lines.push(`Missões de moedas (extrato hoje): +${lastReport.ledger.missionsCoins}`);
     }
 
     // Extrato das ações de tarefas (título + tipo), como no relatório do ali-coins.
@@ -153,6 +183,17 @@ function statusLabel(status) {
       stopped: 'cancelado',
       blocked: 'bloqueado'
     }[status] || status
+  );
+}
+
+function sourceLabel(source) {
+  return (
+    {
+      'desktop-bonus': 'extrato',
+      'desktop-checkin': 'extrato',
+      'mobile-modal': 'modal mobile',
+      'streak-estimate': 'estimativa pela sequência'
+    }[source] || ''
   );
 }
 

@@ -8,10 +8,11 @@
  *  - locale pt-BR herdado do perfil do usuário.
  */
 
-import { COIN_URL, pickDevice } from '../common/constants.js';
+import { COIN_URL, MYCOIN_URL, pickDevice } from '../common/constants.js';
 
 const DNR_UA_RULE_ID = 9001;
 const DNR_HINTS_RULE_ID = 9002;
+const LEDGER_TAB_KEY = 'ledgerTabRef';
 
 // IMPORTANTE: sem `resourceTypes` explícito o Chrome NÃO casa requisições de
 // navegação (main_frame) — era a causa raiz do primeiro load em layout desktop.
@@ -208,20 +209,63 @@ export async function waitTabComplete(tabId, timeoutMs = 45000) {
 
 /**
  * Fecha abas órfãs (popups/novas abas abertas por cliques de tarefas),
- * espelhando closeOrphanPages do ali-coins.
+ * espelhando closeOrphanPages do ali-coins. A aba do extrato pode ser
+ * preservada via `extraKeep`.
  * @param {number} windowId
  * @param {number} keepTabId
+ * @param {number[]} [extraKeep]
  */
-export async function closeOrphanTabs(windowId, keepTabId) {
+export async function closeOrphanTabs(windowId, keepTabId, extraKeep = []) {
+  const keep = new Set([keepTabId, ...extraKeep.filter(Boolean)]);
   try {
     const tabs = await chrome.tabs.query({ windowId });
     for (const tab of tabs) {
-      if (tab.id && tab.id !== keepTabId) {
+      if (tab.id && !keep.has(tab.id)) {
         await chrome.tabs.remove(tab.id).catch(() => {});
       }
     }
   } catch {
     // Janela pode ter sido fechada pelo usuário: ignora.
+  }
+}
+
+/**
+ * Garante uma aba dedicada ao extrato desktop dentro da janela de execução.
+ * A aba NÃO recebe as regras de User-Agent mobile (que são escopadas à aba
+ * principal), então a página mycoin renderiza na variante desktop — como o
+ * contexto desktop do ali-coins. Criada em segundo plano (active: false).
+ * @param {number} windowId
+ * @returns {Promise<number>} tabId
+ */
+export async function ensureLedgerTab(windowId) {
+  const data = await chrome.storage.session.get(LEDGER_TAB_KEY);
+  const ref = data[LEDGER_TAB_KEY] || null;
+  if (ref && ref.tabId) {
+    try {
+      const tab = await chrome.tabs.get(ref.tabId);
+      if (tab && tab.windowId === windowId) return tab.id;
+    } catch {
+      // Aba sumiu: recria abaixo.
+    }
+  }
+
+  const tab = await chrome.tabs.create({ windowId, url: MYCOIN_URL, active: false });
+  await chrome.storage.session.set({ [LEDGER_TAB_KEY]: { tabId: tab.id, windowId } });
+  return tab.id;
+}
+
+/**
+ * Fecha a aba do extrato (se existir) e limpa a referência.
+ */
+export async function closeLedgerTab() {
+  try {
+    const data = await chrome.storage.session.get(LEDGER_TAB_KEY);
+    const ref = data[LEDGER_TAB_KEY];
+    if (ref && ref.tabId) {
+      await chrome.tabs.remove(ref.tabId).catch(() => {});
+    }
+  } finally {
+    await chrome.storage.session.remove(LEDGER_TAB_KEY).catch(() => {});
   }
 }
 
