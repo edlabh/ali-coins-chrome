@@ -8,10 +8,41 @@
 
   const AC = (self.AC = self.AC || {});
   const S = AC.selectors;
-  const { sleep, waitUntil, queryVisible, clickHuman, setNativeValue, pressEnter, bodyText, findByText, closeModals, captchaInfo, parseNumber, scrollFor } = AC.dom;
+  const { sleep, waitUntil, queryVisible, clickHuman, setNativeValue, pressEnter, bodyText, findByText, findAllByText, closeModals, captchaInfo, parseNumber, scrollFor } = AC.dom;
 
   AC.state = AC.state || { stopRequested: false };
   const isStopped = () => AC.state.stopRequested === true;
+
+  /**
+   * Clique "de verdade" via CDP (background) quando disponível; o evento
+   * sintético fica como fallback. O clique vai por COORDENADAS (centro do
+   * elemento), como um tap real: atinge o que está visualmente no ponto e
+   * produz eventos isTrusted=true (SPAs podem ignorar eventos sintéticos).
+   * @param {Element} el
+   * @returns {Promise<boolean>} true quando o clique confiável foi aplicado
+   */
+  async function smartClick(el) {
+    if (!el) return false;
+    try {
+      el.scrollIntoView({ block: 'center', inline: 'center' });
+    } catch {
+      // segue com a posição atual
+    }
+    await sleep(120);
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      if (x >= 0 && y >= 0 && x <= window.innerWidth && y <= window.innerHeight) {
+        const res = await chrome.runtime
+          .sendMessage({ type: 'TRUSTED_CLICK', payload: { x, y } })
+          .catch(() => null);
+        if (res && res.ok) return true;
+      }
+    }
+    clickHuman(el);
+    return false;
+  }
 
   // ---------------------------------------------------------------------------
   // Detecção de estado da página
@@ -102,7 +133,7 @@
       if (!form.password && !coinUiPresent()) {
         const cont = findContinueButton();
         if (cont) {
-          clickHuman(cont);
+          await smartClick(cont);
           await waitUntil(() => loginFormState().password || coinUiPresent() || captchaInfo().present, {
             timeout: 4000
           });
@@ -122,7 +153,7 @@
       if (captchaInfo().present) return { needsCaptcha: true };
 
       const btn = findSignInButton();
-      if (btn) clickHuman(btn);
+      if (btn) await smartClick(btn);
       else pressEnter(form.password);
 
       const outcome = await waitUntil(
@@ -252,7 +283,7 @@
         const text = (el.textContent || '').trim();
         if (S.tasks.openDrawerTexts.some((re) => re.test(text))) continue;
 
-        clickHuman(el);
+        await smartClick(el);
         const confirmed = await waitUntil(() => todayChecked(), { timeout: 3000, interval: 300 });
         await sleep(800);
         if (confirmed) {
@@ -264,7 +295,7 @@
       if (!justCollected) {
         const btn = findByText(S.checkin.collectButtonTexts, { tagNames: ['button', 'div'], maxCandidates: 1500 });
         if (btn) {
-          clickHuman(btn);
+          await smartClick(btn);
           justCollected = Boolean(await waitUntil(() => todayChecked(), { timeout: 3000, interval: 300 }));
         }
       }
@@ -298,7 +329,7 @@
     try {
       const waterBtn = queryVisible(S.checkin.waterBtn);
       if (waterBtn) {
-        clickHuman(waterBtn);
+        await smartClick(waterBtn);
         water = true;
         await sleep(800);
       }
@@ -406,41 +437,53 @@
       await sleep(350);
     }
 
-    for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const clickedTargets = [];
+    const failedTargets = new Set();
+
+    for (let attempt = 1; attempt <= 6; attempt += 1) {
       if (isStopped()) return { aborted: true };
       if (captchaInfo().present) return { needsCaptcha: true };
       closeModals();
 
-      // 1) Texto primeiro ("Earn more coins"/"Ganhe mais moedas"): os seletores
-      // por classe também casam o botão de check-in (aecoin-signButton) e o
-      // clique caía no alvo errado — o painel nunca abria.
-      let btn = findByText(S.tasks.openDrawerTexts, {
-        tagNames: ['button', 'div', 'span'],
-        maxCandidates: 3000
-      });
-      if (btn) btn = AC.dom.clickableFrom(btn);
+      // Candidatos: TODOS os textos "Ganhe mais moedas" (mais internos primeiro)
+      // — o clique anterior mirava um único alvo e o handler podia estar no
+      // elemento irmão/filho. Também usa o candidato por classe como reserva.
+      const candidates = findAllByText(S.tasks.openDrawerTexts, {
+        tagNames: ['button', 'a', 'div', 'span'],
+        maxCandidates: 6000
+      }).filter((el) => !failedTargets.has(el));
 
-      // 2) Fallback por classe, descartando candidatos que pareçam check-in.
-      if (!btn) {
-        const candidate = queryVisible(S.tasks.openDrawerBtn);
-        if (candidate && !isCheckinCandidate(candidate)) {
-          btn = AC.dom.clickableFrom(candidate);
+      if (candidates.length === 0) {
+        const classCandidate = queryVisible(S.tasks.openDrawerBtn);
+        if (classCandidate && !isCheckinCandidate(classCandidate)) {
+          const el = AC.dom.clickableFrom(classCandidate);
+          if (!failedTargets.has(el)) candidates.push(el);
         }
       }
 
-      if (btn) {
-        clickHuman(btn);
-        const opened = await waitUntil(() => drawerOpen() || queryVisible(S.tasks.taskItem), {
-          timeout: 6000,
-          interval: 400
-        });
-        if (opened) return { ok: true };
-      } else {
+      if (candidates.length === 0) {
         window.scrollBy(0, 220);
+        await sleep(1200);
+        continue;
       }
-      await sleep(1400);
+
+      // Cicla pelos candidatos, mais interno primeiro. smartClick usa o clique
+      // REAL por coordenadas (CDP quando disponível), como um tap do usuário.
+      const target = candidates[0];
+      clickedTargets.push((target.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 40));
+      await smartClick(target);
+
+      const opened = await waitUntil(() => drawerOpen() || queryVisible(S.tasks.taskItem), {
+        timeout: 4000,
+        interval: 300
+      });
+      if (opened) return { ok: true };
+
+      // Este alvo não abriu o painel: não repete o mesmo na sequência.
+      failedTargets.add(target);
+      await sleep(900);
     }
-    return { ok: false, debug: drawerDebug() };
+    return { ok: false, debug: { ...drawerDebug(), clickedTargets } };
   }
 
   function extractTasks() {
@@ -494,7 +537,7 @@
     return { tasks };
   }
 
-  function clickTask({ index, title }) {
+  async function clickTask({ index, title }) {
     const rows = Array.from(document.querySelectorAll(S.tasks.taskItem)).filter((e) => AC.dom.isVisible(e));
     if (rows.length === 0) return { clicked: false };
 
@@ -511,7 +554,7 @@
     const btn = row.querySelector(S.tasks.taskBtn) || row.querySelector(S.tasks.taskRight);
     if (!btn) return { clicked: false };
     const btnText = (btn.innerText || '').trim();
-    clickHuman(btn);
+    await smartClick(btn);
     return { clicked: true, btnText };
   }
 
@@ -602,7 +645,7 @@
         }
       }
 
-      clickHuman(link || target);
+      await smartClick(link || target);
       touched.add(sig);
       saveTouched(touched);
       clicked += 1;
@@ -627,7 +670,7 @@
     if (!input) {
       const opener = queryVisible('[class*="searchBar"], [class*="search-bar"], [class*="searchBox"], [aria-label*="search" i], [class*="search"]');
       if (opener && /search|busca/i.test(opener.className + ' ' + (opener.getAttribute('aria-label') || ''))) {
-        clickHuman(opener);
+        await smartClick(opener);
         input = await waitUntil(() => queryVisible(S.tasks.searchInput), { timeout: 4000, interval: 300 });
       }
     }

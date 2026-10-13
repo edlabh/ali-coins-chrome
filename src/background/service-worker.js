@@ -6,9 +6,15 @@ import { MSG } from '../common/constants.js';
 import { startRun, requestStop } from './runner.js';
 import { installScheduler, scheduleDaily } from './scheduler.js';
 import { prepareRunTab } from './tabs.js';
+import { clickTrusted, forgetCdp } from './cdp.js';
 import { getRunState, getRuntime, getSettings, pushReport } from './storage.js';
 
 installScheduler();
+
+// O usuário pode cancelar o aviso de depuração: mantém o conjunto local coerente.
+chrome.debugger.onDetach.addListener((source) => {
+  if (source && typeof source.tabId === 'number') forgetCdp(source.tabId);
+});
 
 /**
  * Roteador de mensagens.
@@ -65,6 +71,19 @@ async function handleMessage(message, sender) {
       const settings = await getSettings();
       const win = await prepareRunTab(settings);
       return { ok: true, ...win };
+    }
+
+    // Cliques reais (CDP) solicitados pelo content script: o alvo é a aba que
+    // enviou a mensagem (tabs.sendMessage não transporta clique confiável).
+    case MSG.TRUSTED_CLICK: {
+      const tabId = sender && sender.tab ? sender.tab.id : null;
+      const payload = (message && message.payload) || {};
+      const x = Number(payload.x);
+      const y = Number(payload.y);
+      if (!tabId || !Number.isFinite(x) || !Number.isFinite(y)) {
+        return { ok: false, error: 'parametros-invalidos' };
+      }
+      return await clickTrusted(tabId, x, y);
     }
 
     case MSG.SETTINGS_CHANGED: {

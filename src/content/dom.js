@@ -177,6 +177,51 @@
   }
 
   /**
+   * Todos os elementos visíveis que casam com os padrões de texto, priorizando
+   * os MAIS INTERNOS (sem descendente que também casa) — clicar num wrapper cujo
+   * handler está no filho não dispara nada; com clique por coordenadas (CDP) o
+   * alvo mais preciso garante que o ponto visual seja o correto.
+   * @param {RegExp[]} patterns
+   * @param {{tagNames?: string[], maxCandidates?: number}} [options]
+   * @returns {Element[]}
+   */
+  function findAllByText(patterns, options = {}) {
+    const tags = options.tagNames || ['button', 'a', 'div', 'span'];
+    const maxCandidates = options.maxCandidates || 6000;
+    let candidates;
+    try {
+      candidates = document.querySelectorAll(tags.join(','));
+    } catch {
+      return [];
+    }
+
+    const matched = [];
+    let checked = 0;
+    for (const el of candidates) {
+      checked += 1;
+      if (checked > maxCandidates) break;
+      const text = (el.textContent || '').trim();
+      if (!text || text.length > 60) continue;
+      if (!patterns.some((re) => re.test(text))) continue;
+      if (!isVisible(el)) continue;
+      matched.push(el);
+    }
+
+    const matchedSet = new Set(matched);
+    const innermost = matched.filter((el) => {
+      try {
+        for (const child of el.querySelectorAll(tags.join(','))) {
+          if (matchedSet.has(child)) return false;
+        }
+      } catch {
+        // subárvore inacessível: mantém o elemento como candidato
+      }
+      return true;
+    });
+    return innermost.length > 0 ? innermost : matched;
+  }
+
+  /**
    * Fecha modais/toasts com segurança: apenas elementos de fechar dentro de
    * containers de diálogo/overlay (como closeModals do ali-coins).
    */
@@ -305,6 +350,7 @@
     pressEnter,
     bodyText,
     findByText,
+    findAllByText,
     closeModals,
     captchaInfo,
     parseNumber,

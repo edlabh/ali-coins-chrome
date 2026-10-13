@@ -45,6 +45,7 @@ import {
   waitTabComplete
 } from './tabs.js';
 import { notify, notifyCaptcha, notifyResult, setBadge } from './notify.js';
+import { attachCdp, detachCdp } from './cdp.js';
 
 const KEEPALIVE_MS = 20000;
 let keepAliveTimer = null;
@@ -180,6 +181,18 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
     ctx.tabId = win.tabId;
     await patchRunState({ tabId: ctx.tabId, windowId: ctx.windowId });
     await appendLog(ctx, 'Janela mobile (Pixel 8) preparada com as regras de User-Agent.');
+
+    // Cliques reais via CDP (isTrusted): o AliExpress ignora eventos sintéticos
+    // em alguns botões (ex.: o painel "Ganhe mais moedas" não abria). O aviso de
+    // depuração do Chrome aparece na janela; se indisponível, o content script
+    // cai no fallback sintético sozinho.
+    const cdpReady = await attachCdp(ctx.tabId).catch(() => false);
+    await appendLog(
+      ctx,
+      cdpReady
+        ? 'Cliques confiáveis (CDP) ativos para esta execução.'
+        : 'CDP indisponível (aviso de depuração cancelado?) — usando eventos sintéticos como fallback.'
+    );
 
     // 2. Autenticação — SOMENTE se a sessão ainda não estiver ativa.
     auth = await ensureAuthenticated(ctx);
@@ -439,6 +452,7 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
  */
 async function applyWindowPolicy(ctx, settings) {
   if (!ctx.windowId) return;
+  if (ctx.tabId) await detachCdp(ctx.tabId).catch(() => {});
   if (settings.keepWindowOpen) {
     await appendLog(ctx, 'Janela mobile mantida aberta (configuração).');
     await closeLedgerTab();

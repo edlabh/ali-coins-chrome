@@ -122,6 +122,13 @@ Decisões de projeto relevantes:
   do extrato > modal mobile > estimativa pela sequência, compensa o saldo quando o
   crédito do check-in ainda não apareceu e calcula o ganho das tarefas pelo **delta de
   saldo**. Sequência quebrada gera alerta (log + notificação + extrato).
+- **Cliques confiáveis (CDP)**: botões que ignoram eventos sintéticos (o painel
+  "Ganhe mais moedas" é um caso real) recebem cliques REAIS via `chrome.debugger`
+  (`Input.dispatchMouseEvent` — o mesmo mecanismo do Playwright no ali-coins),
+  aplicados por coordenadas (o alvo é o elemento visualmente no ponto). O Chrome
+  exibe um **aviso de depuração** na janela de execução enquanto ela estiver aberta
+  — não cancele, é o mecanismo que aplica os cliques. Se o aviso for cancelado, a
+  extensão cai sozinha no fallback com eventos sintéticos.
 - **Captcha**: a resolução é sempre manual (a extensão não tenta deslizar o desafio).
   Detecção por `#nc_1_n1z`, `.btn_slide`, containers `nocaptcha`/`baxia` e iframes.
 - **Tarefas de app** (Prize Land, minigames, quizzes, avaliações) são ignoradas por padrão,
