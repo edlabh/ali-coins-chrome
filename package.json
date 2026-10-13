@@ -1,8 +1,9 @@
 {
   "name": "ali-coins-chrome",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
+  "license": "MIT",
   "description": "Extensão Chrome que replica o ali-coins (check-in e tarefas de moedas do AliExpress) com emulação mobile Pixel 8.",
   "scripts": {
     "test": "node --test tests/*.test.js",

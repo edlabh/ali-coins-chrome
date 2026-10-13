@@ -207,3 +207,8 @@ src/options/              página de opções
 tests/unit.test.js        testes da lógica pura + sanidade do manifest
 tools/make-icons.py       gerador de ícones (sem dependências)
 ```
+
+## Licença
+
+MIT — veja [`LICENSE`](LICENSE). A automação do AliExpress é de responsabilidade
+do usuário (veja o aviso no topo deste README).
