@@ -21,11 +21,15 @@
     </div>
     <p id="statusMessage" class="muted">Pronto para executar.</p>
     <p id="statusTiming" class="muted small"></p>
+    <ul id="liveLog" class="report hidden"></ul>
   </section>
 
   <section id="warnings" class="warnings hidden">
     <div id="warnCredentials" class="warn hidden">
       Configure <strong>usuário e senha</strong> em <em>Opções</em> para começar.
+    </div>
+    <div id="warnAlready" class="warn info hidden">
+      ✓ O check-in de hoje <strong>já havia sido coletado</strong> — nenhuma moeda nova de check-in neste run.
     </div>
     <div id="warnBlocked" class="warn hidden">
       Bloqueio anti-bot ativo. Execuções pausadas por precaução até o horário indicado.

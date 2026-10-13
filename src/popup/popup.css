@@ -136,6 +136,12 @@ body {
   font-size: 12px;
 }
 
+.warn.info {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
 .card h2 {
   margin: 0 0 6px;
   font-size: 12.5px;

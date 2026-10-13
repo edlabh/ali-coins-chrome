@@ -10,7 +10,14 @@ import vm from 'node:vm';
 import path from 'node:path';
 
 import { computeNextRunAt, parseTimeOfDay, formatDuration, randInt } from '../src/common/schedule.js';
-import { pickNextTask, taskKey, buildReport, summarizeTasks } from '../src/common/state-utils.js';
+import {
+  pickNextTask,
+  taskKey,
+  buildReport,
+  summarizeTasks,
+  migrateSettings,
+  SETTINGS_VERSION
+} from '../src/common/state-utils.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
@@ -126,10 +133,32 @@ test('buildReport calcula ganho de saldo e duração', () => {
     endedAt: 51000,
     status: 'success',
     balanceBefore: 100,
-    balanceAfter: 130
+    balanceAfter: 130,
+    log: [{ t: 2000, msg: 'início' }]
   });
   assert.equal(report.gained, 30);
   assert.equal(report.durationMs, 50000);
+  assert.equal(report.log.length, 1);
+  assert.equal(report.log[0].msg, 'início');
+});
+
+test('migrateSettings desliga keepWindowOpen legado e carimba a versão', () => {
+  // Config antiga (padrão antigo mantinha a janela aberta) → migra para fechar.
+  const legacy = migrateSettings({ keepWindowOpen: true, user: 'a@b.com' });
+  assert.equal(legacy.changed, true);
+  assert.equal(legacy.settings.keepWindowOpen, false);
+  assert.equal(legacy.settings.settingsVersion, SETTINGS_VERSION);
+  assert.equal(legacy.settings.user, 'a@b.com');
+
+  // Config já na versão atual: preferência do usuário é preservada.
+  const current = migrateSettings({ keepWindowOpen: true, settingsVersion: SETTINGS_VERSION });
+  assert.equal(current.changed, false);
+  assert.equal(current.settings.keepWindowOpen, true);
+
+  // Sem config salva: defaults migrados, sem quebra.
+  const fresh = migrateSettings(undefined);
+  assert.equal(fresh.changed, true);
+  assert.equal(fresh.settings.keepWindowOpen, false);
 });
 
 // ---------------------------------------------------------------------------

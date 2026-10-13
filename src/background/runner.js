@@ -9,9 +9,14 @@
  * Fluxo: auth -> checkin -> tasks -> finalize, com gate de captcha em qualquer passo.
  */
 
-import { CMD, PHASE, RUN_STATUS } from '../common/constants.js';
+import { CMD, COIN_URL_TASKS, PHASE, RUN_LOG_LIMIT, RUN_STATUS } from '../common/constants.js';
 import { formatDuration, randInt } from '../common/schedule.js';
-import { buildReport, pickNextTask, taskKey } from '../common/state-utils.js';
+import {
+  buildReport,
+  pickNextTask,
+  summarizeTasks,
+  taskKey
+} from '../common/state-utils.js';
 import {
   getPassword,
   getRunState,
@@ -23,6 +28,7 @@ import {
 } from './storage.js';
 import {
   applyDeviceRules,
+  clearDeviceRules,
   closeOrphanTabs,
   focusWindow,
   isCoinUrl,
@@ -32,7 +38,6 @@ import {
   waitTabComplete
 } from './tabs.js';
 import { notifyCaptcha, notifyResult, setBadge } from './notify.js';
-import { COIN_URL_TASKS } from '../common/constants.js';
 
 const KEEPALIVE_MS = 20000;
 let keepAliveTimer = null;
@@ -68,6 +73,27 @@ class RunBlockedError extends Error {
 }
 
 /**
+ * Anexa uma linha ao extrato da execução (persistido no run state para o popup
+ * acompanhar ao vivo e para o relatório final no histórico).
+ * @param {object} ctx
+ * @param {string} message
+ */
+async function appendLog(ctx, message) {
+  if (!ctx || !Array.isArray(ctx.log)) return;
+  ctx.log.push({ t: Date.now(), msg: String(message).slice(0, 220) });
+  if (ctx.log.length > RUN_LOG_LIMIT) {
+    ctx.log.splice(0, ctx.log.length - RUN_LOG_LIMIT);
+  }
+  await patchRunState({ log: ctx.log }).catch(() => {});
+}
+
+function reasonLabel(reason) {
+  if (reason === 'schedule') return 'agendamento diário';
+  if (reason === 'startup') return 'abertura do Chrome';
+  return 'execução manual';
+}
+
+/**
  * Ponto de entrada do run. Não lança: sempre finaliza com relatório.
  * @param {{reason?: string, manual?: boolean}} options
  * @returns {Promise<{started: boolean, alreadyRunning?: boolean, blockedUntil?: number|null}>}
@@ -100,7 +126,9 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
     startedAt,
     finishedAt: null,
     stopRequested: false,
-    stats: { captchaEvents: 0, tasks: [], skipped: [], errors: [] }
+    stats: { captchaEvents: 0, tasks: [], skipped: [], errors: [] },
+    checkin: null,
+    log: []
   });
   await setBadge('RUN', 'run');
   startKeepAlive();
@@ -115,8 +143,10 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
     tabId: null,
     windowId: null,
     balanceBefore: null,
-    abortableSleep: sleepAbortable
+    log: []
   };
+
+  await appendLog(ctx, `Execução iniciada (${reasonLabel(reason)}).`);
 
   let status = RUN_STATUS.SUCCESS;
   let checkin = null;
@@ -142,6 +172,7 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
     ctx.windowId = win.windowId;
     ctx.tabId = win.tabId;
     await patchRunState({ tabId: ctx.tabId, windowId: ctx.windowId });
+    await appendLog(ctx, 'Janela mobile (Pixel 8) preparada com as regras de User-Agent.');
 
     // 2. Autenticação — SOMENTE se a sessão ainda não estiver ativa.
     auth = await ensureAuthenticated(ctx);
@@ -159,13 +190,38 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
     await updatePhase(PHASE.CHECKIN, 'Realizando check-in diário…');
     checkin = await commandWithCaptcha(ctx, CMD.DO_CHECKIN, {}, 'checkin');
     if (checkin && checkin.needsLogin) {
+      await appendLog(ctx, 'A sessão expirou durante o check-in — autenticando e repetindo.');
       const retryAuth = await ensureAuthenticated(ctx);
       if (!retryAuth.ok) throw new Error(retryAuth.error || 'Falha de autenticação.');
       await ensureCoinPage(ctx, true);
       checkin = await commandWithCaptcha(ctx, CMD.DO_CHECKIN, {}, 'checkin');
     }
     ctx.balanceBefore = toNumberOrNull(checkin.balance);
-    await patchRunState({ stats: { ...stats } });
+
+    if (checkin.justCollected) {
+      await appendLog(
+        ctx,
+        `Check-in realizado: +${checkin.coins ?? '?'} moedas${
+          checkin.streak ? ` (sequência de ${checkin.streak} dias)` : ''
+        }.`
+      );
+    } else if (checkin.already) {
+      await appendLog(ctx, 'Check-in: já havia sido coletado hoje — nenhuma moeda nova de check-in.');
+    } else {
+      await appendLog(ctx, 'Check-in: clique não confirmado pela UI (veja o extrato).');
+    }
+    if (ctx.balanceBefore !== null) {
+      await appendLog(ctx, `Saldo atual: ${ctx.balanceBefore} moedas.`);
+    }
+
+    await patchRunState({
+      stats: { ...stats },
+      checkin: {
+        already: Boolean(checkin.already),
+        justCollected: Boolean(checkin.justCollected),
+        coins: checkin.coins ?? null
+      }
+    });
 
     // 4. Tarefas
     await updatePhase(PHASE.TASKS, 'Executando tarefas "Ganhe mais moedas"…');
@@ -177,6 +233,14 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
     await ensureCoinPage(ctx, true);
     const balanceRead = await commandWithCaptcha(ctx, CMD.READ_BALANCE, {}, 'balance');
     const balanceAfter = toNumberOrNull(balanceRead.balance);
+
+    if (balanceAfter !== null) {
+      const delta =
+        ctx.balanceBefore !== null ? ` (${balanceAfter - ctx.balanceBefore >= 0 ? '+' : ''}${balanceAfter - ctx.balanceBefore} neste run)` : '';
+      await appendLog(ctx, `Saldo final: ${balanceAfter} moedas${delta}.`);
+    } else {
+      await appendLog(ctx, 'Saldo final não disponível na página (N/D).');
+    }
 
     if (stats.errors.length > 0) status = RUN_STATUS.PARTIAL;
 
@@ -193,7 +257,8 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
       tasks: stats.tasks,
       skipped: stats.skipped,
       errors: stats.errors,
-      captchaEvents: stats.captchaEvents
+      captchaEvents: stats.captchaEvents,
+      log: ctx.log
     });
     await finalize(report, settings, true);
     return { started: true };
@@ -221,7 +286,8 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
       tasks: stats.tasks,
       skipped: stats.skipped,
       errors: stats.errors,
-      captchaEvents: stats.captchaEvents
+      captchaEvents: stats.captchaEvents,
+      log: ctx.log
     });
     await finalize(report, settings, false);
     return { started: true };
@@ -233,11 +299,17 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
 
 /**
  * Fecha a janela no fim do run conforme a preferência (keepWindowOpen).
+ * Fechando a janela, as session rules da aba são descartadas junto.
  */
 async function applyWindowPolicy(ctx, settings) {
   if (!ctx.windowId) return;
-  if (settings.keepWindowOpen) return;
+  if (settings.keepWindowOpen) {
+    await appendLog(ctx, 'Janela mobile mantida aberta (configuração).');
+    return;
+  }
+  await appendLog(ctx, 'Concluído — fechando a janela mobile.');
   await chrome.windows.remove(ctx.windowId).catch(() => {});
+  await clearDeviceRules().catch(() => {});
 }
 
 async function finalize(report, settings, ok) {
@@ -264,12 +336,15 @@ function mapErrorPhase(status) {
 
 function describeReport(report) {
   const parts = [];
-  if (report.checkin) {
-    if (report.checkin.already) parts.push('check-in já feito hoje');
-    else if (report.checkin.justCollected) parts.push(`check-in +${report.checkin.coins ?? '?'} moedas`);
+  const c = report.checkin;
+  if (c) {
+    if (c.justCollected) parts.push(`check-in +${c.coins ?? '?'} moedas`);
+    else if (c.already) parts.push('check-in já feito hoje');
+    else parts.push('check-in não confirmado');
   }
   const acted = (report.tasks || []).length;
   if (acted) parts.push(`${acted} ação(ões) de tarefas`);
+  else if (c && c.already) parts.push('sem tarefas novas');
   if (report.gained !== null) parts.push(`saldo ${report.gained >= 0 ? '+' : ''}${report.gained}`);
   parts.push(`duração ${formatDuration(report.durationMs)}`);
   if (report.status !== RUN_STATUS.SUCCESS) parts.push(`status: ${report.status}`);
@@ -328,6 +403,7 @@ async function ensureAuthenticated(ctx) {
     }
     if (st.state === 'logged_in') {
       await updatePhase(PHASE.AUTH, 'Sessão do AliExpress já autenticada; login dispensado.');
+      await appendLog(ctx, 'Sessão já autenticada — login dispensado.');
       return { ok: true, already: true };
     }
     if (st.state === 'needs_login') {
@@ -340,11 +416,15 @@ async function ensureAuthenticated(ctx) {
   // UI não decidiu dentro da janela: o cookie de sessão decide.
   if (await hasAuthCookie()) {
     await updatePhase(PHASE.AUTH, 'Cookie de sessão presente; login dispensado.');
+    await appendLog(ctx, 'Cookie de sessão presente — login dispensado.');
     return { ok: true, already: true, cookieOnly: true };
   }
 
   await updatePhase(PHASE.AUTH, 'Login necessário. Autenticando no AliExpress…');
-  return await authenticate(ctx);
+  await appendLog(ctx, 'Login necessário — autenticando com as credenciais salvas.');
+  const result = await authenticate(ctx);
+  if (result.ok) await appendLog(ctx, 'Login concluído com sucesso.');
+  return result;
 }
 
 /**
@@ -393,6 +473,7 @@ async function authenticate(ctx) {
 async function captchaGate(ctx, origin) {
   ctx.stats.captchaEvents += 1;
   await updatePhase(PHASE.CAPTCHA, 'Aguardando você resolver o captcha na janela aberta…');
+  await appendLog(ctx, 'Captcha detectado — aguardando a resolução na janela mobile.');
   await focusWindow(ctx.windowId);
   await notifyCaptcha(ctx.settings);
 
@@ -404,9 +485,11 @@ async function captchaGate(ctx, origin) {
     const res = await cmd(ctx, CMD.WAIT_CAPTCHA, { chunkMs, origin }, { retries: 2 });
     if (res.solved) {
       await setBadge('RUN', 'run');
+      await appendLog(ctx, 'Captcha resolvido — retomando a automação.');
       return;
     }
     if (res.blocked) {
+      await appendLog(ctx, 'Bloqueio anti-bot (RGV587) detectado — pausando por precaução.');
       throw new RunBlockedError(
         'O AliExpress exibiu um bloqueio de risco (RGV587/verificação de segurança). Execuções pausadas por precaução.'
       );
@@ -423,12 +506,16 @@ async function captchaGate(ctx, origin) {
  */
 async function twoFAGate(ctx) {
   await updatePhase(PHASE.TWO_FA, 'Digite o código de verificação 2FA na janela aberta…');
+  await appendLog(ctx, 'Verificação 2FA solicitada — aguardando o código na janela mobile.');
   await focusWindow(ctx.windowId);
   const deadline = Date.now() + ctx.settings.captchaTimeoutMin * 60 * 1000;
   while (Date.now() < deadline) {
     if (await isStopRequestedNow()) throw new RunAbortedError();
     const res = await cmd(ctx, CMD.WAIT_2FA, { chunkMs: 60000 }, { retries: 2 });
-    if (res.ok) return;
+    if (res.ok) {
+      await appendLog(ctx, '2FA concluído — retomando a automação.');
+      return;
+    }
   }
   throw new Error('Tempo esgotado aguardando o código 2FA.');
 }
@@ -467,11 +554,20 @@ async function runTasksPhase(ctx) {
     if (!drawer || !drawer.ok) {
       const dbg = drawer && drawer.debug ? ` Diagnóstico: ${JSON.stringify(drawer.debug)}` : '';
       stats.errors.push(`Painel "Ganhe mais moedas" inacessível.${dbg}`.slice(0, 500));
+      await appendLog(ctx, 'Falha ao abrir o painel de tarefas "Ganhe mais moedas".');
       break;
     }
 
     const extraction = await commandWithCaptcha(ctx, CMD.EXTRACT_TASKS, {}, 'tasks');
     const tasks = (extraction && extraction.tasks) || [];
+
+    if (guard === 1) {
+      const summary = summarizeTasks(tasks);
+      await appendLog(
+        ctx,
+        `Painel de tarefas: ${summary.total} cards (${summary.done} concluídas, ${summary.actionable} executáveis, ${summary.claimable} resgatáveis).`
+      );
+    }
 
     // Marca em lote as tarefas exclusivas do app (evita reabrir a gaveta por tarefa).
     if (settings.skipAppOnlyTasks) {
@@ -482,7 +578,10 @@ async function runTasksPhase(ctx) {
         const key = taskKey(t);
         if ((attempts[key] || 0) < settings.maxAttemptsPerTask) {
           attempts[key] = settings.maxAttemptsPerTask;
-          if (!stats.skipped.includes(t.title)) stats.skipped.push(t.title || '(sem título)');
+          if (!stats.skipped.includes(t.title)) {
+            stats.skipped.push(t.title || '(sem título)');
+            await appendLog(ctx, `Tarefa ignorada (exclusiva do app): ${truncate(t.title, 60)}.`);
+          }
         }
       }
     }
@@ -493,13 +592,24 @@ async function runTasksPhase(ctx) {
       claimed
     });
 
-    if (!next) break;
+    if (!next) {
+      await appendLog(
+        ctx,
+        tasks.length === 0
+          ? 'Nenhum card de tarefa encontrado no painel.'
+          : 'Sem tarefas pendentes (concluídas ou no limite de tentativas).'
+      );
+      break;
+    }
 
     const key = taskKey(next);
 
     if (next.action === 'skip_app_only') {
       attempts[key] = settings.maxAttemptsPerTask; // não re-seleciona
-      if (!stats.skipped.includes(next.title)) stats.skipped.push(next.title || '(sem título)');
+      if (!stats.skipped.includes(next.title)) {
+        stats.skipped.push(next.title || '(sem título)');
+        await appendLog(ctx, `Tarefa ignorada (exclusiva do app): ${truncate(next.title, 60)}.`);
+      }
       await updatePhase(PHASE.TASKS, `Ignorando tarefa exclusiva do app: ${truncate(next.title, 48)}`);
       continue;
     }
@@ -509,6 +619,7 @@ async function runTasksPhase(ctx) {
       claimed.add(key);
       actions += 1;
       stats.tasks.push({ title: next.title, kind: 'claim', result: 'claimed' });
+      await appendLog(ctx, `Resgate solicitado: ${truncate(next.title, 60)}.`);
       await sleepAbortable(1500);
       continue;
     }
@@ -533,6 +644,10 @@ async function runTasksPhase(ctx) {
       kind: next.kind,
       result: actionRes && actionRes.ok === false ? 'error' : 'attempt'
     });
+    await appendLog(
+      ctx,
+      `Tarefa executada: ${truncate(next.title, 60)} (${next.kind}, tentativa ${attempts[key]}).`
+    );
     await patchRunState({ stats: { ...stats } });
 
     await ensureCoinPage(ctx, false);
@@ -556,6 +671,7 @@ async function runTasksPhase(ctx) {
       await cmd(ctx, CMD.CLICK_TASK, { index: t.index, title: t.title }, { retries: 2 });
       claimed.add(taskKey(t));
       stats.tasks.push({ title: t.title, kind: 'claim', result: 'claimed' });
+      await appendLog(ctx, `Resgate solicitado: ${truncate(t.title, 60)}.`);
       await sleepAbortable(1200);
     }
   }

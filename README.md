@@ -43,6 +43,10 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
 5. Quando um captcha aparecer, a janela mobile é trazida para frente e uma notificação
    é exibida. Resolva o desafio na janela — a automação continua sozinha (ou aborta após
    o tempo máximo configurado, padrão 5 min).
+6. Ao concluir, a **janela mobile é fechada automaticamente** (dá para manter aberta nas
+   Opções). O **extrato da execução** aparece no popup (check-in, tarefas, saldo) e o
+   histórico completo fica em **Opções → Extrato de execuções**, com o log passo a passo
+   e o aviso quando o check-in do dia **já havia sido coletado**.
 
 > 💡 **Fuso horário:** o "dia contábil" do AliExpress vira à meia-noite do Pacífico
 > (America/Los_Angeles, UTC-7/-8). Para garantir que o check-in caia sempre no dia novo,
@@ -58,7 +62,7 @@ janela Pixel 8 → m.aliexpress.com/coin-index
    → tarefas "Ganhe mais moedas":
         surpresa (3 cards tocados) • busca (fone bluetooth) • scroll ≥16s (descontos)
         • resgates (COLLECT) • tarefas de app ignoradas (opção)
-   → saldo final + relatório no popup e notificação
+   → saldo final + extrato no popup/opções + notificação + janela mobile fechada
 ```
 
 ## Paridade com o ali-coins (Playwright) e diferenças

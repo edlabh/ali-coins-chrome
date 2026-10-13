@@ -1,10 +1,130 @@
 /**
- * Página de opções: credenciais, agendamento, tarefas, captcha e aparelho.
+ * Página de opções: credenciais, agendamento, tarefas, captcha, aparelho e extrato.
  */
 import { MSG } from '../common/constants.js';
-import { getSettings, saveSettings, clearCredentials, patchRuntime } from '../background/storage.js';
+import {
+  getSettings,
+  saveSettings,
+  clearCredentials,
+  patchRuntime,
+  getRuntime
+} from '../background/storage.js';
 
 const $ = (id) => document.getElementById(id);
+
+function statusLabelPt(status) {
+  return (
+    {
+      success: 'sucesso',
+      partial: 'parcial',
+      error: 'erro',
+      stopped: 'cancelado',
+      blocked: 'bloqueado'
+    }[status] || status || 'desconhecido'
+  );
+}
+
+function sourceLabel(source) {
+  return (
+    {
+      'desktop-bonus': 'extrato',
+      'desktop-checkin': 'extrato',
+      'mobile-modal': 'modal mobile',
+      'streak-estimate': 'estimativa pela sequência'
+    }[source] || source || ''
+  );
+}
+
+function fmtNum(v) {
+  return Number.isFinite(v) ? String(v) : '—';
+}
+
+function runSummaryLine(run) {
+  const when = run.startedAt ? new Date(run.startedAt).toLocaleString('pt-BR') : '—';
+  const bits = [when, statusLabelPt(run.status)];
+  if (run.checkin) {
+    if (run.checkin.justCollected) bits.push(`check-in +${run.checkin.coins ?? '?'}`);
+    else if (run.checkin.already) bits.push('check-in já coletado');
+  }
+  if (Number.isFinite(run.gained)) bits.push(`saldo ${run.gained >= 0 ? '+' : ''}${run.gained}`);
+  return bits.join(' • ');
+}
+
+/** Linhas de detalhe do extrato de uma execução (texto puro, sem innerHTML). */
+function runDetailLines(run) {
+  const lines = [];
+  const c = run.checkin;
+  if (c) {
+    if (c.justCollected) {
+      const src = c.coinsSource ? ` (${sourceLabel(c.coinsSource)})` : '';
+      lines.push(`Check-in: +${c.coins ?? '?'} moedas${src}`);
+    } else if (c.already) {
+      lines.push('Check-in: já realizado hoje');
+    } else {
+      lines.push('Check-in: não confirmado');
+    }
+    if (c.streak) lines.push(`Sequência: ${c.streak} dias`);
+    if (c.streakBroken) lines.push('🚨 Sequência de check-in quebrada neste run');
+  }
+  if (Number.isFinite(run.balanceBefore) || Number.isFinite(run.balanceAfter)) {
+    const delta = Number.isFinite(run.gained) ? ` (${run.gained >= 0 ? '+' : ''}${run.gained} no período)` : '';
+    lines.push(`Saldo: ${fmtNum(run.balanceBefore)} → ${fmtNum(run.balanceAfter)}${delta}`);
+  }
+  if (Number.isFinite(run.tasksGained)) {
+    lines.push(`Tarefas (saldo): ${run.tasksGained >= 0 ? '+' : ''}${run.tasksGained} moedas`);
+  }
+  if (run.ledger && Number.isFinite(run.ledger.missionsCoins)) {
+    const count = run.ledger.missionsCount ? ` (${run.ledger.missionsCount} lançamentos)` : '';
+    lines.push(`Missões de moedas no extrato (hoje): +${run.ledger.missionsCoins}${count}`);
+  }
+  for (const t of run.tasks || []) {
+    const kind = t.kind === 'claim' ? 'resgate' : t.kind || 'ação';
+    lines.push(`• ${t.title || '(sem título)'} — ${kind}`);
+  }
+  const skipped = run.skipped || [];
+  if (skipped.length) lines.push(`Ignoradas (app): ${skipped.join('; ')}`);
+  if (run.captchaEvents) lines.push(`Captchas resolvidos no run: ${run.captchaEvents}`);
+  for (const err of run.errors || []) lines.push(`⚠ ${err}`);
+  for (const entry of run.log || []) {
+    lines.push(`⏱ ${new Date(entry.t).toLocaleTimeString('pt-BR')} ${entry.msg}`);
+  }
+  return lines;
+}
+
+async function renderHistory() {
+  const container = $('historyList');
+  const runtime = await getRuntime();
+  const history = Array.isArray(runtime.history) ? runtime.history : [];
+
+  container.replaceChildren();
+
+  if (history.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'muted small';
+    empty.textContent = 'Nenhuma execução registrada ainda.';
+    container.appendChild(empty);
+    return;
+  }
+
+  for (const run of history) {
+    const details = document.createElement('details');
+    details.className = 'run';
+
+    const summary = document.createElement('summary');
+    summary.textContent = runSummaryLine(run);
+    details.appendChild(summary);
+
+    const list = document.createElement('ul');
+    for (const text of runDetailLines(run)) {
+      const li = document.createElement('li');
+      li.textContent = text;
+      if (text.startsWith('⏱')) li.className = 'log-line';
+      list.appendChild(li);
+    }
+    details.appendChild(list);
+    container.appendChild(details);
+  }
+}
 
 function setStatus(text, kind = '') {
   const el = $('saveStatus');
@@ -128,7 +248,14 @@ $('btnClearCreds').addEventListener('click', async () => {
 
 $('btnClearHistory').addEventListener('click', async () => {
   await patchRuntime({ lastReport: null, history: [], blockedUntil: null });
+  await renderHistory();
   setStatus('Histórico e cooldown limpos.', 'ok');
 });
 
-load().catch((err) => setStatus(`Falha ao carregar opções: ${err.message}`, 'error'));
+$('btnRefreshHistory').addEventListener('click', () => {
+  renderHistory().catch(() => {});
+});
+
+load()
+  .then(() => renderHistory())
+  .catch((err) => setStatus(`Falha ao carregar opções: ${err.message}`, 'error'));

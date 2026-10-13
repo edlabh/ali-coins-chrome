@@ -55,7 +55,35 @@ async function refresh() {
   if (blockedUntil && blockedUntil > Date.now()) {
     $('warnBlocked').textContent = `Bloqueio anti-bot ativo. Novas tentativas liberadas após ${new Date(blockedUntil).toLocaleString('pt-BR')}.`;
   }
-  $('warnings').classList.toggle('hidden', $('warnCredentials').classList.contains('hidden') && $('warnBlocked').classList.contains('hidden'));
+
+  // Aviso de check-in já coletado (ao vivo durante o run ou no último relatório).
+  const alreadyCollected =
+    Boolean(runState && runState.checkin && runState.checkin.already) ||
+    Boolean(lastReport && lastReport.checkin && lastReport.checkin.already);
+  $('warnAlready').classList.toggle('hidden', !alreadyCollected);
+
+  const anyWarning =
+    !$('warnCredentials').classList.contains('hidden') ||
+    !$('warnAlready').classList.contains('hidden') ||
+    !$('warnBlocked').classList.contains('hidden');
+  $('warnings').classList.toggle('hidden', !anyWarning);
+
+  // Extrato ao vivo (últimas linhas do log da execução).
+  const liveLog = $('liveLog');
+  const logEntries = (runState && Array.isArray(runState.log) ? runState.log : []).slice(-6);
+  if (active && logEntries.length > 0) {
+    liveLog.classList.remove('hidden');
+    liveLog.replaceChildren(
+      ...logEntries.map((entry) => {
+        const li = document.createElement('li');
+        li.textContent = `${formatClock(entry.t)} ${entry.msg}`;
+        return li;
+      })
+    );
+  } else {
+    liveLog.classList.add('hidden');
+    liveLog.replaceChildren();
+  }
 
   $('btnRun').classList.toggle('hidden', active);
   $('btnStop').classList.toggle('hidden', !active);
@@ -84,17 +112,26 @@ async function refresh() {
     const c = lastReport.checkin;
     if (c) {
       if (c.justCollected) lines.push(`Check-in: +${c.coins ?? '?'} moedas${c.streak ? ` (sequência ${c.streak} dias)` : ''}`);
-      else if (c.already) lines.push('Check-in: já realizado hoje');
+      else if (c.already) lines.push('Check-in: já realizado hoje (nenhuma moeda nova)');
       else lines.push('Check-in: não confirmado');
     }
     if (Number.isFinite(lastReport.balanceBefore) || Number.isFinite(lastReport.balanceAfter)) {
       lines.push(`Saldo: ${fmt(lastReport.balanceBefore)} → ${fmt(lastReport.balanceAfter)}${lastReport.gained !== null ? ` (${lastReport.gained >= 0 ? '+' : ''}${lastReport.gained})` : ''}`);
     }
-    const claimed = (lastReport.tasks || []).filter((t) => t.kind === 'claim').length;
-    const attempted = (lastReport.tasks || []).filter((t) => t.kind !== 'claim').length;
-    if (attempted) lines.push(`Tarefas executadas: ${attempted}`);
-    if (claimed) lines.push(`Resgates: ${claimed}`);
-    if ((lastReport.skipped || []).length) lines.push(`Ignoradas (app): ${lastReport.skipped.length}`);
+
+    // Extrato das ações de tarefas (título + tipo), como no relatório do ali-coins.
+    const taskEntries = lastReport.tasks || [];
+    for (const t of taskEntries.slice(0, 8)) {
+      const kindLabel = t.kind === 'claim' ? 'resgate' : t.kind || 'ação';
+      const icon = t.result === 'claimed' ? '✓' : t.result === 'error' ? '⚠' : '•';
+      lines.push(`${icon} ${t.title || '(sem título)'} — ${kindLabel}`);
+    }
+    if (taskEntries.length > 8) lines.push(`… e mais ${taskEntries.length - 8} ação(ões).`);
+
+    const skipped = lastReport.skipped || [];
+    if (skipped.length) {
+      lines.push(`Ignoradas (app): ${skipped.slice(0, 3).join('; ')}${skipped.length > 3 ? '…' : ''}`);
+    }
     if (lastReport.captchaEvents) lines.push(`Captchas: ${lastReport.captchaEvents}`);
     for (const err of (lastReport.errors || []).slice(0, 3)) lines.push(`⚠ ${err}`);
     $('reportLines').replaceChildren(...lines.map((text) => {

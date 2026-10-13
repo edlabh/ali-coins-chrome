@@ -7,18 +7,25 @@
 
 import { DEFAULT_SETTINGS, RUN_HISTORY_LIMIT } from '../common/constants.js';
 import { encryptText, decryptText } from '../common/crypt.js';
+import { migrateSettings, SETTINGS_VERSION } from '../common/state-utils.js';
 
 const SETTINGS_KEY = 'settings';
 const RUNTIME_KEY = 'runtime';
 const RUN_STATE_KEY = 'runState';
 
 /**
- * Lê as configurações mescladas com os defaults.
+ * Lê as configurações mescladas com os defaults, aplicando migrações de versão
+ * (uma única vez, persistindo o resultado).
  * @returns {Promise<object>}
  */
 export async function getSettings() {
   const data = await chrome.storage.local.get(SETTINGS_KEY);
-  return { ...DEFAULT_SETTINGS, ...(data[SETTINGS_KEY] || {}) };
+  const { settings: migrated, changed } = migrateSettings(data[SETTINGS_KEY]);
+  const merged = { ...DEFAULT_SETTINGS, ...migrated };
+  if (changed) {
+    await chrome.storage.local.set({ [SETTINGS_KEY]: merged });
+  }
+  return merged;
 }
 
 /**
@@ -43,6 +50,7 @@ export async function saveSettings(patch) {
     }
   }
   delete next.password;
+  next.settingsVersion = SETTINGS_VERSION;
 
   await chrome.storage.local.set({ [SETTINGS_KEY]: next });
   return next;

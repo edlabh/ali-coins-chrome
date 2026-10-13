@@ -119,11 +119,12 @@ export const DEFAULT_SETTINGS = Object.freeze({
   customUA: '',
   customWidth: 412,
   customHeight: 915,
-  keepWindowOpen: true,
+  keepWindowOpen: false, // por padrão a janela mobile é FECHADA ao concluir (configurável)
   notifications: true
 });
 
 export const RUN_HISTORY_LIMIT = 20;
+export const RUN_LOG_LIMIT = 80;
 
 /** Mensagem padrão exibida ao usuário quando um captcha aparece. */
 export const CAPTCHA_NOTIFICATION = {

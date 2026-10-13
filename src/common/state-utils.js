@@ -77,6 +77,35 @@ export function summarizeTasks(tasks) {
 }
 
 /**
+ * Versão do schema de configurações salvas.
+ * v2: a janela mobile passa a ser fechada ao concluir (antes ficava aberta)
+ *     e o run passa a gravar o extrato/log de execução.
+ */
+export const SETTINGS_VERSION = 2;
+
+/**
+ * Migra configurações salvas por versões anteriores.
+ * @param {object | undefined} stored
+ * @returns {{settings: object, changed: boolean}}
+ */
+export function migrateSettings(stored) {
+  const settings = { ...(stored || {}) };
+  let changed = false;
+
+  if (!Number.isFinite(settings.settingsVersion) || settings.settingsVersion < SETTINGS_VERSION) {
+    // O valor `true` vinha do antigo padrão; como o novo comportamento pedido é
+    // fechar a janela ao concluir, migramos apenas quando era o padrão antigo.
+    if (settings.keepWindowOpen === undefined || settings.keepWindowOpen === true) {
+      settings.keepWindowOpen = false;
+    }
+    settings.settingsVersion = SETTINGS_VERSION;
+    changed = true;
+  }
+
+  return { settings, changed };
+}
+
+/**
  * Verifica se um cancelamento foi pedido no run state.
  * @param {{stopRequested?: boolean} | null | undefined} runState
  */
@@ -102,7 +131,8 @@ export function buildReport(input = {}) {
     tasks = [],
     skipped = [],
     errors = [],
-    captchaEvents = 0
+    captchaEvents = 0,
+    log = []
   } = input;
 
   const gained =
@@ -125,6 +155,7 @@ export function buildReport(input = {}) {
     tasks,
     skipped,
     errors,
-    captchaEvents
+    captchaEvents,
+    log
   };
 }
