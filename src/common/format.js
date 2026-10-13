@@ -36,3 +36,16 @@ export function coinsSourceLabel(source) {
 export function fmtNumber(value) {
   return Number.isFinite(value) ? String(value) : '—';
 }
+
+/** Converte um texto/valor monetário em número (null quando ausente/inválido). */
+export function toNumberOrNull(value) {
+  if (value === null || value === undefined) return null;
+  const n = Number.parseInt(String(value).replace(/[^0-9]/g, ''), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Trunca um texto para exibição (com reticências). */
+export function truncate(text, max) {
+  const t = String(text || '').trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}

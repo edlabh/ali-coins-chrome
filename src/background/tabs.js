@@ -8,7 +8,7 @@
  *  - locale pt-BR herdado do perfil do usuário.
  */
 
-import { COIN_URL, MYCOIN_URL, pickDevice } from '../common/constants.js';
+import { COIN_URL, COIN_URL_TASKS, MYCOIN_URL, pickDevice } from '../common/constants.js';
 
 const DNR_UA_RULE_ID = 9001;
 const DNR_HINTS_RULE_ID = 9002;
@@ -350,4 +350,52 @@ export function isCoinUrl(url) {
 
 export function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * URL atual de uma aba ('' quando indisponível).
+ * @param {number} tabId
+ * @returns {Promise<string>}
+ */
+async function getTabUrl(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return tab.url || '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Garante que a aba principal está na central de moedas.
+ * @param {object} ctx ({ tabId, settings })
+ * @param {boolean} [force] força navegação mesmo se já parecer na URL
+ */
+export async function ensureCoinPage(ctx, force = false) {
+  const url = await getTabUrl(ctx.tabId);
+  if (!isCoinUrl(url) || force) {
+    await navigateTab(ctx.tabId, COIN_URL_TASKS);
+    await applyDeviceRules(ctx.tabId, ctx.settings);
+  }
+}
+
+/**
+ * Aguarda uma possível navegação completa após clicar em "GO/IR".
+ * @param {object} ctx
+ * @param {number} timeoutMs
+ * @returns {Promise<boolean>} true se a URL mudou
+ */
+export async function waitPossibleNavigation(ctx, timeoutMs) {
+  const before = await getTabUrl(ctx.tabId);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await sleep(400);
+    const now = await getTabUrl(ctx.tabId);
+    if (now && now !== before) {
+      await waitTabComplete(ctx.tabId, 30000);
+      await sleep(1000);
+      return true;
+    }
+  }
+  return false;
 }
