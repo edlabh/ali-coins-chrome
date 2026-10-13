@@ -51,7 +51,9 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
    - **Notificação condicional** (opcional): avisar apenas quando houver novidade
      (check-in novo, crédito do dia ou tarefas executadas) — erros sempre avisam;
    - atraso inicial aleatório, pausas entre tarefas, máximo de ações, etc.
-4. Use **▶ Executar agora** no popup para validar o fluxo manualmente.
+4. Use **▶ Executar agora** no popup para validar o fluxo manualmente. Para inspecionar
+   a janela mobile a qualquer momento, use **Abrir janela mobile** nas Opções (a tela
+   principal da extensão fica enxuta, só com as ações do dia a dia).
 5. Quando um captcha aparecer, a janela mobile é trazida para frente e uma notificação
    é exibida. Resolva o desafio na janela — a automação continua sozinha (ou aborta após
    o tempo máximo configurado, padrão 5 min).
