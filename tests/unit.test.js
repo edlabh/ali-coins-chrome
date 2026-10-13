@@ -488,6 +488,10 @@ test('ledger: parseBalance, todaySection e readMycoinPage compostos', () => {
   assert.equal(read.todayMissionsCoins, 56);
   assert.equal(read.todayMissionsCount, 1);
 
+  // Varredura estrutural (badge sem a palavra "dias"): só aceita > 7.
+  assert.equal(readMycoinPage(text, new Date(), 240).domStreak, 240);
+  assert.equal(readMycoinPage(text, new Date(), 7).domStreak, null);
+
   // Formato en-US de hoje também resolve a seção.
   const enText = `My coins\n100\n${hojeUs} PT\nApp daily check-in\n+40\n`;
   assert.equal(readMycoinPage(enText).todayBonusCoins, 40);
@@ -600,11 +604,13 @@ test('accounting: syncBalanceWithCheckin compensa extrato defasado', () => {
   );
 });
 
-test('accounting: desktopStreakOf (texto > histórico > tier)', () => {
+test('accounting: desktopStreakOf (texto > estrutural > histórico > tier)', () => {
   assert.equal(desktopStreakOf({ textStreak: 5, historyStreak: 3, todayBonusCoins: 15 }), 5);
   assert.equal(desktopStreakOf({ textStreak: null, historyStreak: 12, todayBonusCoins: 40 }), 12);
   assert.equal(desktopStreakOf({ textStreak: null, historyStreak: null, todayBonusCoins: 15 }), 2);
   assert.equal(desktopStreakOf({ textStreak: 240, historyStreak: 12, todayBonusCoins: 40 }), 240);
+  assert.equal(desktopStreakOf({ textStreak: null, domStreak: 240, historyStreak: 12, todayBonusCoins: 40 }), 240);
+  assert.equal(desktopStreakOf({ textStreak: null, domStreak: null, historyStreak: null, todayBonusCoins: 40 }), 7);
   assert.equal(desktopStreakOf(null), null);
 });
 

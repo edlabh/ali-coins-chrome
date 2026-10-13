@@ -236,6 +236,9 @@
         if (n > 7 && (best === null || n > best)) best = n;
       }
     }
+    // Varredura estrutural (badge de sequência sem a palavra "dias" ao lado).
+    const structural = AC.dom.readStreakFromStructure();
+    if (structural !== null && (best === null || structural > best)) best = structural;
     return best !== null ? best : fallback;
   }
 
@@ -381,7 +384,9 @@
     );
     await sleep(600);
 
-    return AC.ledger.readMycoinPage(bodyText(150000));
+    // Varredura estrutural (badge de sequência) complementa os padrões textuais.
+    const domStreak = AC.dom.readStreakFromStructure();
+    return AC.ledger.readMycoinPage(bodyText(150000), new Date(), domStreak);
   }
 
   // ---------------------------------------------------------------------------

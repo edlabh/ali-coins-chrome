@@ -284,13 +284,14 @@ export function protectConsolidatedStreak({ next, previous, streakBroken = false
 
 /**
  * Deriva o streak "desktop" de uma leitura do extrato:
- * leitura textual explícita > histórico de datas > tier das moedas do dia.
+ * leitura textual explícita > varredura estrutural > histórico de datas > tier.
  * @param {object|null} ledger
  * @returns {number|null}
  */
 export function desktopStreakOf(ledger) {
   if (!ledger) return null;
   if (Number.isFinite(ledger.textStreak)) return ledger.textStreak;
+  if (Number.isFinite(ledger.domStreak) && ledger.domStreak > 7) return ledger.domStreak;
   const history = Number.isFinite(ledger.historyStreak) ? ledger.historyStreak : 0;
   const tier = streakFromCoins(ledger.todayBonusCoins) || 0;
   const max = Math.max(history, tier);

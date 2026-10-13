@@ -269,8 +269,10 @@
    * Composição usada pelo content script na página mycoin.
    * @param {string} text texto do body da página
    * @param {Date} [now]
+   * @param {number|null} [domStreak] sequência lida por varredura estrutural
+   *   (elementos com classe de "streak"), quando disponível
    */
-  function readMycoinPage(text, now = new Date()) {
+  function readMycoinPage(text, now = new Date(), domStreak = null) {
     const t = typeof text === 'string' ? text : '';
     const today = todaySection(t, now);
     const ledger = extractTodayLedger(today);
@@ -284,6 +286,7 @@
       todayMissionsCount: ledger.missionsCount,
       textStreak: streakFromText(t),
       historyStreak: streakFromHistory(t, now),
+      domStreak: Number.isFinite(domStreak) && domStreak > 7 ? domStreak : null,
       textLength: t.length
     };
   }

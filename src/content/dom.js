@@ -222,6 +222,47 @@
   }
 
   /**
+   * Varredura ESTRUTURAL por elementos com classe/id que indiquem sequência
+   * (ex.: "streak", "sequência", "sequence"). A página pode exibir o número da
+   * sequência sem a palavra "dias" ao lado (badge com chama, por exemplo), o
+   * que escapa dos padrões textuais. Só valores > 7 são aceitos (o calendário
+   * semanal usa 1..7; maiores são a sequência real).
+   * @returns {number|null}
+   */
+  function readStreakFromStructure() {
+    let best = null;
+    const selectors = [
+      '[class*="streak" i]',
+      '[id*="streak" i]',
+      '[class*="sequ" i]',
+      '[class*="sequence" i]',
+      '[class*="continuous" i]',
+      '[class*="daysCount" i]'
+    ];
+    for (const sel of selectors) {
+      let els;
+      try {
+        els = document.querySelectorAll(sel);
+      } catch {
+        continue;
+      }
+      let count = 0;
+      for (const el of els) {
+        count += 1;
+        if (count > 40) break;
+        if (!isVisible(el)) continue;
+        const text = (el.innerText || el.textContent || '').trim();
+        if (!text || text.length > 40) continue;
+        for (const m of text.matchAll(/([0-9]{1,6})/g)) {
+          const n = Number.parseInt(m[1], 10);
+          if (Number.isFinite(n) && n > 7 && (best === null || n > best)) best = n;
+        }
+      }
+    }
+    return best;
+  }
+
+  /**
    * Fecha modais/toasts com segurança: apenas elementos de fechar dentro de
    * containers de diálogo/overlay (como closeModals do ali-coins).
    */
@@ -351,6 +392,7 @@
     bodyText,
     findByText,
     findAllByText,
+    readStreakFromStructure,
     closeModals,
     captchaInfo,
     parseNumber,
