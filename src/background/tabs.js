@@ -61,7 +61,7 @@ function dnrCondition(tabId) {
  * @param {{forceVisible?: boolean}} [options]
  * @returns {Promise<{windowId: number, tabId: number, reused: boolean}>}
  */
-export async function ensureRunWindow(settings, { forceVisible = false } = {}) {
+async function ensureRunWindow(settings, { forceVisible = false } = {}) {
   const silent = Boolean(settings.silentMode) && !forceVisible;
   const runtimeRef = await getRuntimeTab();
 
@@ -346,11 +346,11 @@ export function isAliexpressUrl(url) {
   return /https:\/\/([a-z0-9-]+\.)*aliexpress\.(com|us)\//i.test(url || '');
 }
 
-export function isCoinUrl(url) {
+function isCoinUrl(url) {
   return /coin-index/.test(url || '');
 }
 
-export function sleep(ms) {
+function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 

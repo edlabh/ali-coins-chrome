@@ -292,8 +292,6 @@
   }
 
   return {
-    CHECKIN_LABEL_PATTERN,
-    parseBalanceNumber,
     parseBalance,
     streakFromText,
     todaySection,

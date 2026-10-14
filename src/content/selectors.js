@@ -13,10 +13,6 @@
       usernameInput:
         '#fm-login-id, input[name="loginId"], input.cosmos-input[type="email"], input.cosmos-input[type="text"], input[type="email"][name*="login" i], input[placeholder*="email" i], input[placeholder*="phone" i], input[placeholder*="e-mail" i]',
       passwordInput: 'input[type="password"], #fm-login-password',
-      continueBtn:
-        'button.cosmos-btn-primary, button:not([type="submit"])',
-      signInBtn:
-        'button.cosmos-btn-primary[type="submit"], button[type="submit"], button.cosmos-btn-primary, button:has-text("Sign in"), button:has-text("Entrar")',
       twoFactorInput:
         '#fm-login-code, input[name="checkCode"], input[autocomplete="one-time-code"], input[placeholder*="verification code" i], input[placeholder*="código" i][maxlength="6"], input.check-code-input[type="tel"][maxlength="6"]',
       loginPendingContainer: '.login-pending-container'
@@ -44,7 +40,6 @@
       collectButtonTexts: [/^Collect$/i, /^Coletar$/i, /^Get$/i, /^Receber$/i, /^Check\s?in$/i, /^Fazer check-?in$/i],
       todayChecked: '[class*="today-checked"], [class*="aecoin-today-checked"]',
       todayTextPattern: /Today[\s\S]{0,15}✓/i,
-      dayNumber: '[class*="dayNumber"], [class*="checkedDay"], [class*="currentDay"], [class*="activeDay"]',
       waterBtn: '[class*="waterCollected"], button[class*="water"], [aria-label*="water" i], [aria-label*="regar" i]'
     },
 
@@ -59,8 +54,7 @@
         /([0-9]+)\s*-?\s*(?:day|dia|dias|days)?\s*-?\s*streak/i,
         /streak(?:\s*de|:)?\s*([0-9]+)/i,
         /([0-9]+)\s*(?:days?|dias?)\s*(?:in\s*a\s*row|consecutivos?)/i
-      ],
-      loginPromptText: /sign in with email code|switch account|trocar de conta|forgot password|esqueci minha senha/i
+      ]
     },
 
     tasks: {

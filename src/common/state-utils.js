@@ -144,14 +144,6 @@ export function shouldScheduleRetry({ status, reason, retryOnFailure = true } = 
 }
 
 /**
- * Verifica se um cancelamento foi pedido no run state.
- * @param {{stopRequested?: boolean} | null | undefined} runState
- */
-export function isStopRequested(runState) {
-  return Boolean(runState && runState.stopRequested === true);
-}
-
-/**
  * Reconstrói o JSON do relatório final (usado por popup/tests).
  * @param {object} input
  */

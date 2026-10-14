@@ -68,15 +68,6 @@
   }
 
   /**
-   * Aguarda um seletor visível.
-   * @param {string | string[]} selectors
-   * @param {number} [timeout=8000]
-   */
-  function waitVisible(selectors, timeout = 8000) {
-    return waitUntil(() => queryVisible(selectors), { timeout });
-  }
-
-  /**
    * Clique "humano": sequência de eventos de ponteiro + click().
    * Os eventos sintéticos bastam para os handlers do AliExpress (o próprio
    * ali-coins usa el.click() via evaluate como fallback em vários pontos).
@@ -409,7 +400,6 @@
     isVisible,
     queryVisible,
     waitUntil,
-    waitVisible,
     clickHuman,
     clickableFrom,
     setNativeValue,

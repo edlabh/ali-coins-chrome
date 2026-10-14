@@ -110,10 +110,6 @@ async function handleMessage(message, sender) {
       return { ok: true, runTab, runId: runTab ? runState.runId : null };
     }
 
-    case MSG.CONTENT_PROGRESS: {
-      return { ok: true };
-    }
-
     default:
       return { ok: false, error: `Mensagem desconhecida: ${type}` };
   }
