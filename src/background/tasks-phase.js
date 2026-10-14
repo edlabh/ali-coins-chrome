@@ -18,12 +18,15 @@ import {
 } from './context.js';
 import { commandWithCaptcha } from './gates.js';
 import { patchRunState } from './storage.js';
+import { consumeItemTab } from './item-tab.js';
 import {
   closeOrphanTabs,
   ensureCoinPage,
   getTabUrl,
   isAliexpressUrl,
-  waitPossibleNavigation
+  navigateTab,
+  waitPossibleNavigation,
+  waitTabComplete
 } from './tabs.js';
 
 /**
@@ -59,6 +62,77 @@ async function safeTaskCmd(ctx, type, payload = {}) {
     if (isNoContentScriptError(err)) return recoverToCoinPage(ctx, type);
     throw err;
   }
+}
+
+/**
+ * Tarefa de surpresas (paridade com o ali-coins): 3 toques por rodada, com
+ * retorno à tela do feed entre eles. A navegação (aba de item, voltar) é
+ * tratada aqui no background — o content script morre em navegações completas.
+ * Itens nunca se repetem (sessionStorage no content + retomada da rodada).
+ * @returns {Promise<{ok: boolean, clicked: number}>}
+ */
+async function runSurpriseTaps(ctx) {
+  const feedUrl = await getTabUrl(ctx.tabId);
+  let clicked = 0;
+  let feedReloaded = false;
+
+  for (let i = 0; i < 3; i += 1) {
+    if (await isStopRequestedNow()) throw new RunAbortedError();
+    const beforeUrl = await getTabUrl(ctx.tabId);
+
+    let res = await safeTaskCmd(ctx, CMD.SURPRISE_TAP, {});
+    if (res === null) break; // página sem content script: já voltamos à central
+
+    if (!res.clicked) {
+      // Sem item novo: recarrega o feed UMA vez para buscar cards diferentes.
+      if (!feedReloaded && feedUrl) {
+        feedReloaded = true;
+        await appendLog(ctx, 'Feed de surpresas sem itens novos — recarregando uma vez.');
+        await navigateTab(ctx.tabId, feedUrl, 30000).catch(() => {});
+        res = await safeTaskCmd(ctx, CMD.SURPRISE_TAP, {});
+        if (res === null) break;
+      }
+      if (!res || !res.clicked) {
+        await appendLog(ctx, `Feed de surpresas sem itens novos após ${clicked} toque(s).`);
+        break;
+      }
+    }
+
+    clicked += 1;
+    await settleAfterSurpriseTap(ctx, beforeUrl, feedUrl);
+  }
+  return { ok: clicked > 0, clicked };
+}
+
+/**
+ * Pós-toque (equivalentes ao waitForEvent('page')/goBack do ali-coins):
+ *  - aba de item aberta → aguarda os beacons e fecha;
+ *  - a própria página navegou → aguarda, volta e garante a tela do feed;
+ *  - sem navegação visível → pequena pausa.
+ */
+async function settleAfterSurpriseTap(ctx, beforeUrl, feedUrl) {
+  const itemTabClosed = await consumeItemTab(ctx.windowId, { timeoutMs: 2500, graceMs: 1000 });
+  if (itemTabClosed) {
+    await sleepAbortable(600);
+    return;
+  }
+
+  const urlNow = await getTabUrl(ctx.tabId);
+  if (urlNow && urlNow !== beforeUrl) {
+    await sleepAbortable(1200); // deixa os beacons de tracking dispararem
+    await chrome.tabs.goBack(ctx.tabId).catch(() => {});
+    await waitTabComplete(ctx.tabId, 15000);
+    const backUrl = await getTabUrl(ctx.tabId);
+    if (feedUrl && backUrl && backUrl !== feedUrl) {
+      // Não voltou à tela inicial: força a navegação de volta ao feed.
+      await navigateTab(ctx.tabId, feedUrl, 30000).catch(() => {});
+    }
+    await sleepAbortable(500);
+    return;
+  }
+
+  // Sem navegação visível (overlay/SPA): pausa curta antes do próximo toque.
+  await sleepAbortable(600);
 }
 
 /**
@@ -226,19 +300,26 @@ export async function runTasksPhase(ctx) {
     }
 
     const seconds = next.scrollSeconds || settings.scrollSeconds;
-    const actionRes = await safeTaskCommand(
-      ctx,
-      CMD.RUN_ACTION,
-      { kind: next.kind, query: settings.searchQuery, seconds, navigated },
-      'action'
-    );
-    if (actionRes === null) {
-      // Página sem content script: conta a tentativa e segue (a central já
-      // foi reaberta pela recuperação).
-      attempts[key] = (attempts[key] || 0) + 1;
-      actions += 1;
-      stats.tasks.push({ title: next.title, kind: next.kind, result: 'error' });
-      continue;
+    let actionRes;
+    if (next.kind === 'surprise') {
+      // Surpresas: 3 toques nesta rodada, com navegação orquestrada no
+      // background (o content script morre na navegação para a ficha do item).
+      actionRes = await runSurpriseTaps(ctx);
+    } else {
+      actionRes = await safeTaskCommand(
+        ctx,
+        CMD.RUN_ACTION,
+        { kind: next.kind, query: settings.searchQuery, seconds, navigated },
+        'action'
+      );
+      if (actionRes === null) {
+        // Página sem content script: conta a tentativa e segue (a central já
+        // foi reaberta pela recuperação).
+        attempts[key] = (attempts[key] || 0) + 1;
+        actions += 1;
+        stats.tasks.push({ title: next.title, kind: next.kind, result: 'error' });
+        continue;
+      }
     }
 
     attempts[key] = (attempts[key] || 0) + 1;

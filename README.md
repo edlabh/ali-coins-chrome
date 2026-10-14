@@ -74,7 +74,8 @@ janela Pixel 8 → m.aliexpress.com/coin-index
      login (usuário → senha → [captcha: aguarda você] → [2FA: aguarda você])
    → check-in diário (#signButton) + confirmação do marcador "today-checked"
    → tarefas "Ganhe mais moedas":
-        surpresa (3 cards tocados) • busca (fone bluetooth) • scroll ≥16s (descontos)
+        surpresa (3 itens por rodada, até 2 rodadas — itens nunca repetem)
+        • busca (fone bluetooth) • scroll ≥16s (descontos)
         • resgates (COLLECT) • tarefas de app ignoradas (opção)
    → saldo final + extrato no popup/opções + notificação + janela mobile fechada
 ```

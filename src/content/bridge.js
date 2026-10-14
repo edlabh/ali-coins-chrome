@@ -42,6 +42,8 @@
           return await AC.actions.openDrawer();
         case 'EXTRACT_TASKS':
           return AC.actions.extractTasks();
+        case 'SURPRISE_TAP':
+          return await AC.actions.surpriseTapNext();
         case 'CLICK_TASK':
           return AC.actions.clickTask(payload);
         case 'RUN_ACTION':

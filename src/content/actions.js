@@ -686,73 +686,51 @@
   }
 
   /**
-   * Delega ao background a checagem de ABA de item aberta pelo card: o service
-   * worker aguarda a aba aparecer, dá um tempo para os beacons de tracking e a
-   * fecha — o equivalente ao waitForEvent('page') + close do ali-coins.
+   * Toca UM item novo do feed de surpresas e retorna IMEDIATAMENTE — a
+   * orquestração da navegação (abrir/fechar a ficha do produto, voltar à tela
+   * inicial e repetir) fica no background, que sobrevive a navegações completas
+   * da aba (o content script morre numa navegação e não voltaria sozinho).
+   *
+   * Itens já tocados ficam em sessionStorage e NUNCA se repetem — inclusive
+   * entre rodadas da mesma tarefa (persiste na aba).
+   * @returns {Promise<{clicked: boolean, signature?: string, cards?: number}>}
    */
-  async function consumeItemTabIfAny() {
-    const res = await chrome.runtime
-      .sendMessage({ type: 'HANDLE_ITEM_TAB', payload: { graceMs: 1000, timeoutMs: 2500 } })
-      .catch(() => null);
-    return Boolean(res && res.closed);
-  }
-
-  async function surpriseTaps(seconds) {
+  async function surpriseTapNext() {
     await waitUntil(() => queryVisible(S.tasks.productCard), { timeout: 12000, interval: 500 });
     const touched = loadTouched();
-    let clicked = 0;
 
-    for (let i = 0; i < 3; i += 1) {
-      if (isStopped()) break;
-
-      let target = null;
-      let sig = '';
-      const pickUntapped = () => {
-        const cards = feedCardCandidates();
-        for (let idx = 0; idx < cards.length; idx += 1) {
-          const s = cardSignature(cards[idx], idx);
-          if (!touched.has(s)) {
-            target = cards[idx];
-            sig = s;
-            return true;
-          }
+    let target = null;
+    let sig = '';
+    const pickUntapped = () => {
+      const cards = feedCardCandidates();
+      for (let idx = 0; idx < cards.length; idx += 1) {
+        const s = cardSignature(cards[idx], idx);
+        if (!touched.has(s)) {
+          target = cards[idx];
+          sig = s;
+          return true;
         }
-        return false;
-      };
+      }
+      return false;
+    };
 
+    pickUntapped();
+    if (!target) {
+      // Sem card novo na tela: rola para carregar mais itens (como o ali-coins).
+      await scrollFor(2, isStopped);
       pickUntapped();
-      if (!target) {
-        // Sem card novo: rola para carregar mais itens (como o ali-coins).
-        await scrollFor(Math.max(2, Math.min(4, seconds || 2)), isStopped);
-        pickUntapped();
-      }
-      if (!target) break;
-
-      const beforeUrl = location.href;
-      const link = target.matches && target.matches('a') ? target : target.querySelector('a');
-
-      // O site abre a ficha do produto em NOVA ABA (fluxo esperado pelo
-      // ali-coins). NÃO forçamos target=_self: o background detecta a aba,
-      // aguarda os beacons e a fecha — e o modo silencioso devolve o foco ao
-      // usuário em vez de deixar a aba aparecer em primeiro plano.
-      await smartClick(link || target);
-      touched.add(sig);
-      saveTouched(touched);
-      clicked += 1;
-
-      const itemTabClosed = await consumeItemTabIfAny();
-      if (!itemTabClosed && location.href !== beforeUrl) {
-        // Sem aba nova: a PRÓPRIA página navegou para a ficha do produto.
-        await sleep(1000);
-        history.back();
-        await waitUntil(
-          () => location.href === beforeUrl || feedCardCandidates().length > 0,
-          { timeout: 8000, interval: 400 }
-        );
-      }
-      await sleep(600);
     }
-    return { ok: clicked > 0, clicked };
+    if (!target) {
+      return { clicked: false, cards: feedCardCandidates().length };
+    }
+
+    const link = target.matches && target.matches('a') ? target : target.querySelector('a');
+    // O site abre a ficha (nova aba ou mesma aba): o background detecta,
+    // espera os beacons de tracking e retorna à tela inicial.
+    await smartClick(link || target);
+    touched.add(sig);
+    saveTouched(touched);
+    return { clicked: true, signature: sig, cards: feedCardCandidates().length };
   }
 
   async function executeSearchTask(query, seconds) {
@@ -781,15 +759,13 @@
    */
   async function runAction({ kind, query, seconds }) {
     if (captchaInfo().present) return { needsCaptcha: true };
-    if (kind === 'surprise') {
-      const res = await surpriseTaps(seconds || 10);
-      return { ok: true, ...res };
-    }
     if (kind === 'search') {
       const res = await executeSearchTask(query, seconds || 10);
       return { ok: true, ...res };
     }
-    // scroll / prize-land / app-only (quando habilitado nas opções)
+    // scroll / prize-land / app-only (quando habilitado nas opções).
+    // Surpresas NÃO passam por aqui: o background orquestra tap a tap
+    // (CMD.SURPRISE_TAP), pois a navegação para a ficha derruba este contexto.
     await scrollFor(seconds || 10, isStopped);
     return { ok: true };
   }
@@ -805,6 +781,7 @@
     openDrawer,
     extractTasks,
     listFeedCards: () => feedCardCandidates().map((el, idx) => cardSignature(el, idx)),
+    surpriseTapNext,
     clickTask,
     runAction,
     coinUiPresent

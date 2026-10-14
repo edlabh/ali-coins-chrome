@@ -9,8 +9,6 @@ import { prepareRunTab } from './tabs.js';
 import { clickTrusted, forgetCdp } from './cdp.js';
 import { getRunState, getRuntime, getSettings, pushReport } from './storage.js';
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 installScheduler();
 
 // O usuário pode cancelar o aviso de depuração: mantém o conjunto local coerente.
@@ -122,41 +120,6 @@ async function handleMessage(message, sender) {
         return { ok: false, error: 'aba-fora-do-run' };
       }
       return await clickTrusted(tabId, x, y);
-    }
-
-    // O content script do feed de surpresas pergunta se o clique abriu uma ABA
-    // de item: aguarda a aba aparecer, dá um tempo para os beacons de tracking
-    // e a fecha — equivalente ao waitForEvent('page') + close do ali-coins.
-    case MSG.HANDLE_ITEM_TAB: {
-      const runState = await getRunState();
-      const windowId = sender && sender.tab ? sender.tab.windowId : null;
-      if (!runState || !runState.active || !windowId) return { closed: false };
-
-      const payload = (message && message.payload) || {};
-      const timeoutMs = Math.min(Math.max(Number(payload.timeoutMs) || 2500, 500), 8000);
-      const graceMs = Math.min(Math.max(Number(payload.graceMs) || 1000, 200), 5000);
-      const known = new Set(Array.isArray(runState.knownTabIds) ? runState.knownTabIds : []);
-
-      const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
-        const tabs = await chrome.tabs.query({ windowId }).catch(() => []);
-        const itemTab = tabs.find(
-          (t) =>
-            t.id &&
-            t.id !== runState.tabId &&
-            t.id !== runState.ledgerTabId &&
-            !known.has(t.id) &&
-            !/^chrome:\/\//.test(t.url || '') &&
-            !/coin-pc-index/.test(t.url || '')
-        );
-        if (itemTab) {
-          await sleep(graceMs); // deixa os beacons de tracking dispararem
-          await chrome.tabs.remove(itemTab.id).catch(() => {});
-          return { closed: true, url: itemTab.url || '' };
-        }
-        await sleep(250);
-      }
-      return { closed: false };
     }
 
     case MSG.SETTINGS_CHANGED: {
