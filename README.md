@@ -45,6 +45,8 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
    - **Catch-up de agenda** (padrão): se o Chrome estava fechado no horário agendado,
      a execução acontece na próxima abertura;
    - **Retentativa automática** (padrão): uma falha agenda **1 nova tentativa** em ~45 min;
+   - **Tarefa "Explore itens surpresa"** (não funciona no site mobile atual): ignorada
+     por padrão — desmarque a opção para voltar a tentá-la;
    - **Modo silencioso** (**padrão**): executa em uma **aba de fundo, sem abrir
      janela** — a aba só vem para frente se um captcha/2FA precisar de você;
      desmarque para acompanhar a execução numa janela visível;
@@ -74,9 +76,8 @@ janela Pixel 8 → m.aliexpress.com/coin-index
      login (usuário → senha → [captcha: aguarda você] → [2FA: aguarda você])
    → check-in diário (#signButton) + confirmação do marcador "today-checked"
    → tarefas "Ganhe mais moedas":
-        surpresa (3 itens por rodada, até 2 rodadas — itens nunca repetem)
-        • busca (fone bluetooth) • scroll ≥16s (descontos)
-        • resgates (COLLECT) • tarefas de app ignoradas (opção)
+        busca (fone bluetooth) • scroll ≥16s (descontos) • resgates (COLLECT)
+        • tarefas de app e "Explore itens surpresa" ignoradas (configurável nas Opções)
    → saldo final + extrato no popup/opções + notificação + janela mobile fechada
 ```
 
@@ -87,7 +88,7 @@ janela Pixel 8 → m.aliexpress.com/coin-index
 | Emulação mobile | Pixel 7 (Playwright `devices`) | Pixel 8 via janela 412×915 + UA/Client Hints (DNR) |
 | Login | usuário/senha + slide captcha | usuário/senha → captcha manual assistido |
 | Check-in | `#signButton` + confirmação + streak | idêntico (mesmos seletores/fallbacks) |
-| Tarefas | surpresa/busca/scroll/resgate, gaveta `.e2e_task` | idêntico (mesma classificação e limites) |
+| Tarefas | surpresa/busca/scroll/resgate, gaveta `.e2e_task` | idêntico (Explore itens surpresa ignorada por padrão) |
 | Captcha | tenta deslizar automaticamente | pausa e aguarda o usuário resolver (por design) |
 | Contabilidade | extrato desktop (mycoin): saldo, Bônus diário, Missões de moedas | idêntica — aba desktop dedicada, mesmo parser e prioridades |
 | Risco RGV587 | cooldown 48h + fail-fast | cooldown configurável (padrão 48h) |

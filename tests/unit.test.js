@@ -157,6 +157,18 @@ test('pickNextTask pula tarefas exclusivas do app quando configurado', () => {
   assert.equal(picked.title, 'Merge Boss');
 });
 
+test('pickNextTask pula "Explore itens surpresa" por padrão', () => {
+  const t = task({ title: 'Explore itens surpresa', kind: 'surprise' });
+
+  const picked = pickNextTask([t], {}, {});
+  assert.equal(picked.action, 'skip_surprise');
+  assert.equal(picked.title, 'Explore itens surpresa');
+
+  const reenabled = pickNextTask([t], {}, { skipSurpriseTask: false });
+  assert.equal(reenabled.action, 'run');
+  assert.equal(reenabled.kind, 'surprise');
+});
+
 test('pickNextTask não repete resgates já clicados', () => {
   const t = task({ title: 'Resgatar', isActionable: false, isClaimable: true });
   const picked = pickNextTask([t], {}, { claimed: new Set([taskKey(t)]) });

@@ -34,6 +34,7 @@ export function pickNextTask(tasks, attempts = {}, options = {}) {
     ? options.maxAttemptsPerTask
     : 3;
   const skipAppOnly = options.skipAppOnlyTasks !== false;
+  const skipSurprise = options.skipSurpriseTask !== false;
   const claimed = options.claimed instanceof Set ? options.claimed : new Set();
   const list = Array.isArray(tasks) ? tasks : [];
 
@@ -55,6 +56,9 @@ export function pickNextTask(tasks, attempts = {}, options = {}) {
     const kind = t.kind || 'scroll';
     if ((kind === 'app-only' || kind === 'prize-land') && skipAppOnly) {
       return { ...t, action: 'skip_app_only' };
+    }
+    if (kind === 'surprise' && skipSurprise) {
+      return { ...t, action: 'skip_surprise' };
     }
     return { ...t, action: 'run', kind };
   }

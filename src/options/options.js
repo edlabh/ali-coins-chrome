@@ -129,6 +129,7 @@ async function load() {
   $('startDelayMaxMin').value = s.startDelayMaxMin ?? 15;
 
   $('skipAppOnlyTasks').checked = s.skipAppOnlyTasks !== false;
+  $('skipSurpriseTask').checked = s.skipSurpriseTask !== false;
   $('maxTaskActions').value = s.maxTaskActions ?? 25;
   $('maxAttemptsPerTask').value = s.maxAttemptsPerTask ?? 3;
   $('pauseMinS').value = Math.round((s.pauseBetweenTasksMinMs ?? 5000) / 1000);
@@ -174,6 +175,7 @@ async function save() {
     startDelayMaxMin: toInt($('startDelayMaxMin').value, 15),
 
     skipAppOnlyTasks: $('skipAppOnlyTasks').checked,
+    skipSurpriseTask: $('skipSurpriseTask').checked,
     maxTaskActions: toInt($('maxTaskActions').value, 25),
     maxAttemptsPerTask: toInt($('maxAttemptsPerTask').value, 3),
     pauseBetweenTasksMinMs: pauseMinS * 1000,

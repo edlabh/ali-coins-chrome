@@ -266,19 +266,28 @@ export async function runTasksPhase(ctx) {
       );
     }
 
-    // Marca em lote as tarefas exclusivas do app (evita reabrir a gaveta por tarefa).
-    if (settings.skipAppOnlyTasks) {
-      for (const t of tasks) {
-        if (!t) continue;
-        const kind = t.kind || 'scroll';
-        if (kind !== 'app-only' && kind !== 'prize-land') continue;
-        const key = taskKey(t);
-        if ((attempts[key] || 0) < settings.maxAttemptsPerTask) {
-          attempts[key] = settings.maxAttemptsPerTask;
-          if (!stats.skipped.includes(t.title)) {
-            stats.skipped.push(t.title || '(sem título)');
-            await appendLog(ctx, `Tarefa ignorada (exclusiva do app): ${truncate(t.title, 60)}.`);
-          }
+    // Marca em lote as tarefas puladas por configuração (evita reabrir a
+    // gaveta por tarefa): exclusivas do app (padrão) e "Explore itens surpresa"
+    // (não funciona no site mobile — ignorada por padrão).
+    const shouldSkipKind = (kind) => {
+      if (kind === 'surprise') return settings.skipSurpriseTask !== false;
+      return settings.skipAppOnlyTasks && (kind === 'app-only' || kind === 'prize-land');
+    };
+    for (const t of tasks) {
+      if (!t) continue;
+      const kind = t.kind || 'scroll';
+      if (!shouldSkipKind(kind)) continue;
+      const key = taskKey(t);
+      if ((attempts[key] || 0) < settings.maxAttemptsPerTask) {
+        attempts[key] = settings.maxAttemptsPerTask;
+        if (!stats.skipped.includes(t.title)) {
+          stats.skipped.push(t.title || '(sem título)');
+          await appendLog(
+            ctx,
+            kind === 'surprise'
+              ? `Tarefa ignorada (opção — não funciona no site mobile): ${truncate(t.title, 60)}.`
+              : `Tarefa ignorada (exclusiva do app): ${truncate(t.title, 60)}.`
+          );
         }
       }
     }
@@ -286,6 +295,7 @@ export async function runTasksPhase(ctx) {
     const next = pickNextTask(tasks, attempts, {
       maxAttemptsPerTask: settings.maxAttemptsPerTask,
       skipAppOnlyTasks: settings.skipAppOnlyTasks,
+      skipSurpriseTask: settings.skipSurpriseTask !== false,
       claimed
     });
 
@@ -302,13 +312,17 @@ export async function runTasksPhase(ctx) {
 
     const key = taskKey(next);
 
-    if (next.action === 'skip_app_only') {
+    if (next.action === 'skip_app_only' || next.action === 'skip_surprise') {
       attempts[key] = settings.maxAttemptsPerTask; // não re-seleciona
+      const reason =
+        next.action === 'skip_surprise'
+          ? 'opção — não funciona no site mobile'
+          : 'exclusiva do app';
       if (!stats.skipped.includes(next.title)) {
         stats.skipped.push(next.title || '(sem título)');
-        await appendLog(ctx, `Tarefa ignorada (exclusiva do app): ${truncate(next.title, 60)}.`);
+        await appendLog(ctx, `Tarefa ignorada (${reason}): ${truncate(next.title, 60)}.`);
       }
-      await updatePhase(PHASE.TASKS, `Ignorando tarefa exclusiva do app: ${truncate(next.title, 48)}`);
+      await updatePhase(PHASE.TASKS, `Ignorando tarefa (${reason}): ${truncate(next.title, 48)}`);
       continue;
     }
 
