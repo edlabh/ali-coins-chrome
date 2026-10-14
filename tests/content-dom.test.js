@@ -325,6 +325,36 @@ test('AÇÕES: surpriseTapNext toca 1 item por vez e nunca repete (sessionStorag
   assert.equal(fourth.clicked, false);
 });
 
+test('AÇÕES: surpriseTapNext fecha a gaveta .e2e_task aberta antes de clicar no card', async () => {
+  const env = createContentEnv(`
+    <div class="e2e_task" id="drawer">
+      <button class="drawer-close" id="closeBtn">×</button>
+    </div>
+    <div class="aecoin-feedlist-card-sSnlv" data-item-id="card-1"></div>
+  `);
+  const { window } = env;
+  const drawer = window.document.getElementById('drawer');
+  drawer.getBoundingClientRect = () => ({
+    width: 400,
+    height: 500,
+    top: 0,
+    left: 0,
+    right: 400,
+    bottom: 500
+  });
+
+  let closedDrawer = false;
+  window.document.getElementById('closeBtn').addEventListener('click', () => {
+    closedDrawer = true;
+    drawer.setAttribute('data-invisible', '');
+  });
+
+  const res = await env.AC.actions.surpriseTapNext();
+  assert.equal(closedDrawer, true, 'gaveta .e2e_task deve ser fechada antes do toque no card');
+  assert.equal(res.clicked, true);
+  assert.equal(res.signature, 'card-1');
+});
+
 // ---------------------------------------------------------------------------
 // Painel de tarefas (actions.js)
 // ---------------------------------------------------------------------------

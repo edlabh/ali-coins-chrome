@@ -64,9 +64,12 @@
   // (src/content/main-world.js). Duas fontes:
   //  1) hash `#ac_run=1` presente na navegação inicial disparada pelo runner;
   //  2) confirmação do service worker na resposta ao CONTENT_READY.
-  function markRunTab() {
+  function markRunTab(userAgent) {
     try {
       sessionStorage.setItem('ac_run', '1');
+      if (userAgent && typeof userAgent === 'string') {
+        sessionStorage.setItem('ac_ua', userAgent);
+      }
     } catch {
       /* sessionStorage indisponível: o hash cobre a primeira navegação */
     }
@@ -91,7 +94,7 @@
     chrome.runtime
       .sendMessage({ type: 'CONTENT_READY', payload: { url: location.href } })
       .then((res) => {
-        if (res && res.runTab) markRunTab();
+        if (res && res.runTab) markRunTab(res.userAgent);
       })
       .catch(() => {});
   } catch {

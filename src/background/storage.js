@@ -119,26 +119,36 @@ export async function pushReport(report) {
   await patchRuntime({ lastReport: report, history });
 }
 
+// Fila serializada para evitar race conditions em read-modify-write concorrentes
+// (ex.: heartbeat + appendLog + onActivated ao mesmo tempo).
+let runStateChain = Promise.resolve();
+
 /**
  * Estado vivo da execução.
  * @returns {Promise<object|null>}
  */
 export async function getRunState() {
+  await runStateChain.catch(() => {});
   const data = await chrome.storage.session.get(RUN_STATE_KEY);
   return data[RUN_STATE_KEY] || null;
 }
 
 /**
- * Mescla um patch no run state.
+ * Mescla um patch no run state de forma atômica/serializada.
  * @param {object|null} patch — null limpa o estado
  */
-export async function patchRunState(patch) {
-  if (patch === null) {
-    await chrome.storage.session.remove(RUN_STATE_KEY);
-    return null;
-  }
-  const current = (await getRunState()) || {};
-  const next = { ...current, ...patch, updatedAt: Date.now() };
-  await chrome.storage.session.set({ [RUN_STATE_KEY]: next });
-  return next;
+export function patchRunState(patch) {
+  const op = runStateChain.then(async () => {
+    if (patch === null) {
+      await chrome.storage.session.remove(RUN_STATE_KEY);
+      return null;
+    }
+    const data = await chrome.storage.session.get(RUN_STATE_KEY);
+    const current = data[RUN_STATE_KEY] || {};
+    const next = { ...current, ...patch, updatedAt: Date.now() };
+    await chrome.storage.session.set({ [RUN_STATE_KEY]: next });
+    return next;
+  });
+  runStateChain = op.catch(() => {});
+  return op;
 }

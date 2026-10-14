@@ -21,6 +21,8 @@ import {
   shouldScheduleRetry
 } from '../src/common/state-utils.js';
 import { sendCmd, isNoContentScriptError } from '../src/background/context.js';
+import { getRunState, patchRunState } from '../src/background/storage.js';
+import { encryptText, decryptText } from '../src/common/crypt.js';
 import {
   coinsFromStreak,
   streakFromCoins,
@@ -398,6 +400,111 @@ test('main-world spoofa navigator apenas na aba de execução', () => {
   assert.equal(sandbox.navigator.maxTouchPoints, 5);
   assert.equal(sandbox.navigator.userAgentData.mobile, true);
   assert.equal(sandbox.navigator.userAgentData.platform, 'Android');
+
+  // Com User-Agent customizado (ex.: Pixel 7 configurado nas Opções), o spoof
+  // acompanha o header HTTP em userAgent, appVersion e userAgentData.
+  sandbox.sessionStorage._ua =
+    'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36';
+  sandbox.sessionStorage.getItem = function (key) {
+    if (key === 'ac_run') return this._v;
+    if (key === 'ac_ua') return this._ua;
+    return null;
+  };
+  assert.match(sandbox.navigator.userAgent, /Pixel 7/);
+  assert.match(sandbox.navigator.appVersion, /^5\.0 \(Linux; Android 13; Pixel 7\)/);
+  return sandbox.navigator.userAgentData.getHighEntropyValues().then((he) => {
+    assert.equal(he.model, 'Pixel 7');
+    assert.equal(he.platformVersion, '13.0.0');
+  });
+});
+
+test('crypt: encryptText e decryptText cifram e decifram com AES-256-GCM', async () => {
+  const originalIdb = globalThis.indexedDB;
+  const storeMap = new Map();
+  globalThis.indexedDB = {
+    open() {
+      const req = {};
+      queueMicrotask(() => {
+        req.result = {
+          objectStoreNames: { contains: () => true },
+          createObjectStore: () => ({}),
+          transaction: () => ({
+            objectStore: () => ({
+              get(k) {
+                const r = {};
+                queueMicrotask(() => {
+                  r.result = storeMap.get(k);
+                  if (r.onsuccess) r.onsuccess();
+                });
+                return r;
+              },
+              put(v, k) {
+                storeMap.set(k, v);
+              }
+            }),
+            set oncomplete(fn) {
+              queueMicrotask(fn);
+            }
+          }),
+          close() {}
+        };
+        if (req.onupgradeneeded) req.onupgradeneeded();
+        if (req.onsuccess) req.onsuccess();
+      });
+      return req;
+    }
+  };
+  try {
+    const enc = await encryptText('S3nha-Super-Secreta!');
+    assert.ok(enc && enc.v === 1 && enc.iv && enc.ct);
+    assert.notEqual(enc.ct, 'S3nha-Super-Secreta!');
+    const dec = await decryptText(enc);
+    assert.equal(dec, 'S3nha-Super-Secreta!');
+    assert.equal(await decryptText({ v: 1, iv: enc.iv, ct: 'invalido' }), null);
+    assert.equal(await encryptText(''), null);
+  } finally {
+    if (originalIdb === undefined) delete globalThis.indexedDB;
+    else globalThis.indexedDB = originalIdb;
+  }
+});
+
+test('storage: patchRunState serializa escritas concorrentes sem perder campos', async () => {
+  const originalChrome = globalThis.chrome;
+  let sessionData = {};
+  globalThis.chrome = {
+    storage: {
+      session: {
+        get: async (key) => {
+          await new Promise((r) => setTimeout(r, 5));
+          return { [key]: sessionData[key] };
+        },
+        set: async (obj) => {
+          await new Promise((r) => setTimeout(r, 5));
+          sessionData = { ...sessionData, ...obj };
+        },
+        remove: async (key) => {
+          delete sessionData[key];
+        }
+      }
+    }
+  };
+  try {
+    await patchRunState(null);
+    await Promise.all([
+      patchRunState({ active: true, phase: 'tasks' }),
+      patchRunState({ tabId: 42 }),
+      patchRunState({ windowId: 7, message: 'Rodando' })
+    ]);
+    const finalState = await getRunState();
+    assert.equal(finalState.active, true);
+    assert.equal(finalState.phase, 'tasks');
+    assert.equal(finalState.tabId, 42);
+    assert.equal(finalState.windowId, 7);
+    assert.equal(finalState.message, 'Rodando');
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+  }
 });
 
 // ---------------------------------------------------------------------------

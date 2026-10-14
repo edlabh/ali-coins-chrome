@@ -1,7 +1,7 @@
 /**
  * Página de opções: credenciais, agendamento, tarefas, captcha, aparelho e extrato.
  */
-import { MSG } from '../common/constants.js';
+import { DEFAULT_SETTINGS, MSG } from '../common/constants.js';
 import { statusLabel, coinsSourceLabel, fmtNumber } from '../common/format.js';
 import {
   getSettings,
@@ -62,7 +62,7 @@ function runDetailLines(run) {
     lines.push(`• ${t.title || '(sem título)'} — ${kind}`);
   }
   const skipped = run.skipped || [];
-  if (skipped.length) lines.push(`Ignoradas (app): ${skipped.join('; ')}`);
+  if (skipped.length) lines.push(`Ignoradas: ${skipped.join('; ')}`);
   if (run.captchaEvents) lines.push(`Captchas resolvidos no run: ${run.captchaEvents}`);
   for (const err of run.errors || []) lines.push(`⚠ ${err}`);
   for (const entry of run.log || []) {
@@ -130,8 +130,8 @@ async function load() {
 
   $('skipAppOnlyTasks').checked = s.skipAppOnlyTasks !== false;
   $('skipSurpriseTask').checked = s.skipSurpriseTask !== false;
-  $('maxTaskActions').value = s.maxTaskActions ?? 25;
-  $('maxAttemptsPerTask').value = s.maxAttemptsPerTask ?? 3;
+  $('maxTaskActions').value = s.maxTaskActions ?? DEFAULT_SETTINGS.maxTaskActions;
+  $('maxAttemptsPerTask').value = s.maxAttemptsPerTask ?? DEFAULT_SETTINGS.maxAttemptsPerTask;
   $('pauseMinS').value = Math.round((s.pauseBetweenTasksMinMs ?? 5000) / 1000);
   $('pauseMaxS').value = Math.round((s.pauseBetweenTasksMaxMs ?? 20000) / 1000);
   $('searchQuery').value = s.searchQuery || 'fone bluetooth';
@@ -176,8 +176,8 @@ async function save() {
 
     skipAppOnlyTasks: $('skipAppOnlyTasks').checked,
     skipSurpriseTask: $('skipSurpriseTask').checked,
-    maxTaskActions: toInt($('maxTaskActions').value, 25),
-    maxAttemptsPerTask: toInt($('maxAttemptsPerTask').value, 3),
+    maxTaskActions: toInt($('maxTaskActions').value, DEFAULT_SETTINGS.maxTaskActions),
+    maxAttemptsPerTask: toInt($('maxAttemptsPerTask').value, DEFAULT_SETTINGS.maxAttemptsPerTask),
     pauseBetweenTasksMinMs: pauseMinS * 1000,
     pauseBetweenTasksMaxMs: pauseMaxS * 1000,
     searchQuery: $('searchQuery').value.trim() || 'fone bluetooth',
@@ -212,8 +212,27 @@ async function save() {
 
   // Reagenda o alarme diário no service worker.
   await chrome.runtime.sendMessage({ type: 'SETTINGS_CHANGED' }).catch(() => {});
+  hasUnsavedChanges = false;
   setStatus('Configurações salvas.', 'ok');
-  setTimeout(() => setStatus(''), 3000);
+  setTimeout(() => {
+    if (!hasUnsavedChanges) setStatus('');
+  }, 3000);
+}
+
+let hasUnsavedChanges = false;
+
+function installDirtyTracking() {
+  for (const el of document.querySelectorAll('main input, main select')) {
+    if (el.id === 'fileImportJson') continue;
+    const markDirty = () => {
+      hasUnsavedChanges = true;
+      setStatus('Há alterações não salvas — clique em Salvar.', 'warn');
+    };
+    el.addEventListener('change', markDirty);
+    if (el.type === 'text' || el.type === 'password' || el.type === 'number') {
+      el.addEventListener('input', markDirty);
+    }
+  }
 }
 
 $('device').addEventListener('change', () => {
@@ -237,6 +256,11 @@ $('btnOpenWindow').addEventListener('click', async () => {
   else setStatus('Falha ao abrir a janela mobile.', 'error');
 });
 
+$('btnClearCooldown').addEventListener('click', async () => {
+  await patchRuntime({ blockedUntil: null });
+  setStatus('Bloqueio anti-bot (cooldown) liberado; histórico mantido.', 'ok');
+});
+
 $('btnClearCreds').addEventListener('click', async () => {
   await clearCredentials();
   $('user').value = '';
@@ -255,6 +279,80 @@ $('btnRefreshHistory').addEventListener('click', () => {
   renderHistory().catch(() => {});
 });
 
+$('btnExportJson').addEventListener('click', async () => {
+  try {
+    const [settings, runtime] = await Promise.all([getSettings(), getRuntime()]);
+    const safeSettings = { ...settings };
+    delete safeSettings.passwordEnc;
+    delete safeSettings.passwordPlain;
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      settings: safeSettings,
+      runtime: {
+        lastStreak: runtime.lastStreak,
+        lastStreakAt: runtime.lastStreakAt,
+        lastReport: runtime.lastReport,
+        history: runtime.history
+      }
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ali-coins-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus('Backup JSON exportado (sem a senha).', 'ok');
+  } catch (err) {
+    setStatus(`Falha ao exportar: ${err.message}`, 'error');
+  }
+});
+
+$('btnImportJson').addEventListener('click', () => {
+  $('fileImportJson').click();
+});
+
+$('fileImportJson').addEventListener('change', async (ev) => {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = '';
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('Arquivo JSON inválido.');
+    }
+    if (parsed.settings && typeof parsed.settings === 'object') {
+      const safePatch = { ...parsed.settings };
+      delete safePatch.password;
+      delete safePatch.passwordEnc;
+      delete safePatch.passwordPlain;
+      await saveSettings(safePatch);
+      await chrome.runtime.sendMessage({ type: MSG.SETTINGS_CHANGED }).catch(() => {});
+    }
+    if (parsed.runtime && typeof parsed.runtime === 'object') {
+      const rtPatch = {};
+      if (Array.isArray(parsed.runtime.history)) rtPatch.history = parsed.runtime.history.slice(0, 20);
+      if (parsed.runtime.lastReport && typeof parsed.runtime.lastReport === 'object') {
+        rtPatch.lastReport = parsed.runtime.lastReport;
+      }
+      if (Number.isFinite(parsed.runtime.lastStreak)) {
+        rtPatch.lastStreak = parsed.runtime.lastStreak;
+      }
+      if (Object.keys(rtPatch).length > 0) await patchRuntime(rtPatch);
+    }
+    await load();
+    await renderHistory();
+    hasUnsavedChanges = false;
+    setStatus('Backup JSON importado com sucesso.', 'ok');
+  } catch (err) {
+    setStatus(`Falha ao importar JSON: ${err.message}`, 'error');
+  }
+});
+
 load()
-  .then(() => renderHistory())
+  .then(() => {
+    installDirtyTracking();
+    return renderHistory();
+  })
   .catch((err) => setStatus(`Falha ao carregar opções: ${err.message}`, 'error'));

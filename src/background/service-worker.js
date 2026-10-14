@@ -2,18 +2,35 @@
  * Service worker (MV3): roteia mensagens entre popup/options, content scripts e o runner.
  */
 
-import { MSG } from '../common/constants.js';
+import { MSG, pickDevice } from '../common/constants.js';
 import { startRun, requestStop } from './runner.js';
 import { installScheduler, scheduleDaily } from './scheduler.js';
-import { prepareRunTab } from './tabs.js';
+import { focusWindow, prepareRunTab } from './tabs.js';
 import { clickTrusted, forgetCdp } from './cdp.js';
-import { getRunState, getRuntime, getSettings, pushReport } from './storage.js';
+import { getRunState, getRuntime, getSettings, patchRuntime, pushReport } from './storage.js';
 
 installScheduler();
 
 // O usuário pode cancelar o aviso de depuração: mantém o conjunto local coerente.
 chrome.debugger.onDetach.addListener((source) => {
   if (source && typeof source.tabId === 'number') forgetCdp(source.tabId);
+});
+
+// Clique nas notificações do sistema: leva à janela do captcha/run ou abre as Opções.
+chrome.notifications.onClicked.addListener(async (notificationId) => {
+  try {
+    chrome.notifications.clear(notificationId).catch(() => {});
+    if (notificationId === 'ali-coins-missing-credentials') {
+      chrome.runtime.openOptionsPage();
+      return;
+    }
+    const runState = await getRunState();
+    if (runState && runState.windowId) {
+      await focusWindow(runState.windowId, runState.tabId || null);
+    }
+  } catch {
+    // Sem janela ativa: ignora.
+  }
 });
 
 // ── Abas abertas pelo PRÓPRIO SITE durante o run (fichas de produto do feed,
@@ -79,9 +96,15 @@ async function handleMessage(message, sender) {
         },
         runState,
         lastReport: runtime.lastReport,
+        lastStreak: runtime.lastStreak,
         nextRunAt: runtime.nextRunAt,
         blockedUntil: runtime.blockedUntil
       };
+    }
+
+    case MSG.CLEAR_COOLDOWN: {
+      await patchRuntime({ blockedUntil: null });
+      return { ok: true };
     }
 
     case MSG.RUN_NOW: {
@@ -128,13 +151,19 @@ async function handleMessage(message, sender) {
     }
 
     // O content script anuncia que carregou. A resposta confirma se a aba atual
-    // é a aba de execução (usada pelo bridge para marcar sessionStorage `ac_run`,
-    // que autoriza o spoof de navigator no MAIN world).
+    // é a aba de execução (usada pelo bridge para marcar sessionStorage `ac_run`
+    // e `ac_ua`, que autorizam e sincronizam o spoof de navigator no MAIN world).
     case MSG.CONTENT_READY: {
-      const runState = await getRunState();
+      const [runState, settings] = await Promise.all([getRunState(), getSettings()]);
       const tabId = sender && sender.tab ? sender.tab.id : null;
       const runTab = Boolean(runState && runState.active && tabId && runState.tabId === tabId);
-      return { ok: true, runTab, runId: runTab ? runState.runId : null };
+      const device = runTab ? pickDevice(settings) : null;
+      return {
+        ok: true,
+        runTab,
+        runId: runTab ? runState.runId : null,
+        userAgent: device ? device.userAgent : null
+      };
     }
 
     default:

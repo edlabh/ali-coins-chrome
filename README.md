@@ -102,20 +102,39 @@ janela Pixel 8 → m.aliexpress.com/coin-index
 
 ```
 src/background/
-  service-worker.js  Roteador de mensagens
-  runner.js          Máquina de estados (auth → checkin → tasks → finalize) + keepalive
-  scheduler.js       chrome.alarms diário + chrome.runtime.onStartup
-  tabs.js            Janela popup Pixel 8 + session rules de UA (DNR) + abas órfãs
-  storage.js         chrome.storage.local/session + cifragem da senha
+  service-worker.js  Roteador de mensagens, foco ao clicar em notificação e guarda de abas
+  runner.js          Orquestrador principal (auth → checkin → tasks → finalize) + keepalive
+  context.js         Primitivas do run (comandos com retry, logs, esperas abortáveis)
+  gates.js           Gates de intervenção do usuário (captcha e 2FA)
+  auth.js            Verificação de sessão (somente leitura) e login automático
+  checkin-phase.js   Fase de check-in + consolidação da contabilidade e sequência
+  tasks-phase.js     Loop de tarefas "Ganhe mais moedas", adoção de aba e surpresas
+  item-tab.js        Detecção e fechamento de abas de produto abertas pelo feed
+  ledger-read.js     Leitura do extrato desktop (página mycoin) em aba dedicada
+  finalize.js        Contabilidade final, relatório, notificação e política de janela
+  cdp.js             Cliques confiáveis (isTrusted via chrome.debugger) + viewport silenciosa
+  scheduler.js       chrome.alarms diário + catch-up + chrome.runtime.onStartup
+  retry.js           Retentativa única (~45 min) após falha de execução
+  tabs.js            Janela Pixel 8, session rules de UA/Client Hints (DNR) e abas órfãs
+  storage.js         chrome.storage.local/session (fila serializada) + cifragem da senha
   notify.js          Badge + notificações do sistema
+src/common/
+  constants.js       URLs, presets de aparelho, comandos e configurações padrão
+  accounting.js      Funções puras de contabilidade (check-in, tarefas, saldo, streak)
+  state-utils.js     Fila de tarefas (pickNextTask), migrações de schema e relatório
+  schedule.js        Cálculo de horários, catch-up e formatação de tempo
+  format.js          Formatadores compartilhados (pt-BR)
+  crypt.js           Criptografia AES-256-GCM com chave não exportável em IndexedDB
 src/content/
+  main-world.js      Spoof dinâmico de navigator (UA/userAgentData) no MAIN world
   selectors.js       Seletores do AliExpress (espelho do ali-coins + fallbacks)
-  task-classify.js   Classificação das tarefas (surpresa/busca/app/scroll)
-  dom.js             Helpers de DOM (clique humano, esperas, captcha, modal)
+  task-classify.js   Classificação UMD das tarefas (surpresa/busca/app/scroll)
+  ledger.js          Parser UMD do extrato desktop (mycoin) no fuso America/Los_Angeles
+  dom.js             Helpers de DOM (clique humano, esperas, scroll interno, captcha, modal)
   actions.js         Login, check-in, saldo, gaveta e ações por tarefa
-  bridge.js          Ponte de comandos do service worker
-src/popup/           Status ao vivo, agenda e botões
-src/options/         Credenciais, agendamento e ajustes
+  bridge.js          Ponte de comandos do service worker e sincronização do spoof
+src/popup/           Status ao vivo, chips de saldo/sequência, agenda e ações rápidas
+src/options/         Credenciais, agendamento, backup JSON e extrato de execuções
 ```
 
 Decisões de projeto relevantes:
@@ -178,13 +197,15 @@ Decisões de projeto relevantes:
 ```bash
 npm ci          # devDependencies (ESLint + jsdom; o runtime não tem dependências)
 npm test        # testes unitários + testes de DOM (jsdom) dos content scripts
-npm run check   # checagem de sintaxe de todos os módulos
+npm run check   # checagem dinâmica de sintaxe de todos os módulos + versão
 npm run lint    # ESLint (configuração flat)
+npm run pack    # gera dist/ali-coins-chrome-<versão>.zip + dist/SHA256SUMS.txt
 npm run icons   # regera os ícones (tools/make-icons.py)
 ```
 
 O **CI** (GitHub Actions — `.github/workflows/ci.yml`) roda `npm ci`, `npm run check`,
-`npm run lint` e `npm test` em cada push/PR.
+`npm run lint` e `npm test` em cada push/PR, e o workflow `.github/workflows/release.yml`
+publica automaticamente a GitHub Release ao enviar uma tag `v*`.
 
 ## Limitações conhecidas
 
@@ -208,8 +229,10 @@ src/common/               constantes, agendamento, fila de tarefas, criptografia
 src/content/              seletores, classificação, DOM, ações, bridge
 src/popup/                popup de status
 src/options/              página de opções
-tests/unit.test.js        testes da lógica pura + sanidade do manifest
+tests/unit.test.js        testes da lógica pura, criptografia, storage e manifest
 tests/content-dom.test.js testes de DOM (jsdom) dos content scripts reais
+tools/check.mjs           verificador dinâmico de sintaxe e consistência de versão
+tools/pack-release.py     empacotador determinístico (.zip + SHA256SUMS.txt)
 tools/make-icons.py       gerador de ícones (sem dependências)
 ```
 

@@ -46,6 +46,9 @@ const KEEPALIVE_MS = 20000;
 // (ex.: service worker morto no meio). Heartbeats mantêm updatedAt fresco.
 const RUN_STALE_MS = 15 * 60 * 1000;
 let keepAliveTimer = null;
+// Lock síncrono em memória para evitar que dois gatilhos simultâneos (ex.:
+// onStartup + alarme ou duplo clique) passem pela checagem antes de gravar active=true.
+let startingLock = false;
 
 /** Mantém o service worker vivo durante o run (MV3 encerra o SW ocioso em ~30s). */
 function startKeepAlive() {
@@ -77,56 +80,69 @@ function reasonLabel(reason) {
  * @returns {Promise<{started: boolean, alreadyRunning?: boolean, blockedUntil?: number|null}>}
  */
 export async function startRun({ reason = 'manual', manual = false } = {}) {
-  const existing = await getRunState();
+  if (startingLock) {
+    return { started: false, alreadyRunning: true };
+  }
+  startingLock = true;
+
+  let runId;
+  let startedAt;
+  let settings;
+  let credentialsConfigured;
   let staleUnlocked = false;
-  if (existing && existing.active) {
-    const updatedAt = Number.isFinite(existing.updatedAt) ? existing.updatedAt : 0;
-    if (Date.now() - updatedAt > RUN_STALE_MS) {
-      // Estado órfão (SW morto no meio do run): destrava para não bloquear
-      // execuções futuras para sempre.
-      staleUnlocked = true;
-      await patchRunState({
-        active: false,
-        phase: PHASE.ERROR,
-        message: 'Execução anterior órfã destravada.',
-        stopRequested: false
-      });
-    } else {
-      return { started: false, alreadyRunning: true };
+  try {
+    const existing = await getRunState();
+    if (existing && existing.active) {
+      const updatedAt = Number.isFinite(existing.updatedAt) ? existing.updatedAt : 0;
+      if (Date.now() - updatedAt > RUN_STALE_MS) {
+        // Estado órfão (SW morto no meio do run): destrava para não bloquear
+        // execuções futuras para sempre.
+        staleUnlocked = true;
+        await patchRunState({
+          active: false,
+          phase: PHASE.ERROR,
+          message: 'Execução anterior órfã destravada.',
+          stopRequested: false
+        });
+      } else {
+        return { started: false, alreadyRunning: true };
+      }
     }
+
+    const runtime = await getRuntime();
+    if (manual === false && runtime.blockedUntil && Date.now() < runtime.blockedUntil) {
+      return { started: false, blockedUntil: runtime.blockedUntil };
+    }
+
+    settings = await getSettings();
+    // Sem credenciais salvas também é permitido: o AliExpress pode já estar
+    // logado no perfil. O login só é exigido quando a página pedir (ver auth.js),
+    // com um aviso claro pedindo para configurar as Opções.
+    credentialsConfigured = Boolean(
+      settings.user && (settings.passwordEnc || settings.passwordPlain)
+    );
+
+    // Uma nova execução supersede uma retentativa automática pendente.
+    await clearRetry();
+
+    runId = crypto.randomUUID();
+    startedAt = Date.now();
+    await patchRunState({
+      active: true,
+      runId,
+      reason,
+      phase: PHASE.STARTING,
+      message: 'Preparando janela mobile…',
+      startedAt,
+      finishedAt: null,
+      stopRequested: false,
+      stats: { captchaEvents: 0, tasks: [], skipped: [], errors: [] },
+      checkin: null,
+      log: []
+    });
+  } finally {
+    startingLock = false;
   }
-
-  const runtime = await getRuntime();
-  if (manual === false && runtime.blockedUntil && Date.now() < runtime.blockedUntil) {
-    return { started: false, blockedUntil: runtime.blockedUntil };
-  }
-
-  const settings = await getSettings();
-  // Sem credenciais salvas também é permitido: o AliExpress pode já estar
-  // logado no perfil. O login só é exigido quando a página pedir (ver auth.js),
-  // com um aviso claro pedindo para configurar as Opções.
-  const credentialsConfigured = Boolean(
-    settings.user && (settings.passwordEnc || settings.passwordPlain)
-  );
-
-  // Uma nova execução supersede uma retentativa automática pendente.
-  await clearRetry();
-
-  const runId = crypto.randomUUID();
-  const startedAt = Date.now();
-  await patchRunState({
-    active: true,
-    runId,
-    reason,
-    phase: PHASE.STARTING,
-    message: 'Preparando janela mobile…',
-    startedAt,
-    finishedAt: null,
-    stopRequested: false,
-    stats: { captchaEvents: 0, tasks: [], skipped: [], errors: [] },
-    checkin: null,
-    log: []
-  });
   await setBadge('RUN', 'run');
   startKeepAlive();
 

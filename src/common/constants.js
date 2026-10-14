@@ -61,7 +61,8 @@ export const MSG = Object.freeze({
   RUN_NOW: 'RUN_NOW',
   STOP_RUN: 'STOP_RUN',
   OPEN_WINDOW: 'OPEN_WINDOW',
-  SETTINGS_CHANGED: 'SETTINGS_CHANGED'
+  SETTINGS_CHANGED: 'SETTINGS_CHANGED',
+  CLEAR_COOLDOWN: 'CLEAR_COOLDOWN'
 });
 
 /** Fases visíveis do run (exibidas no popup/badge). */

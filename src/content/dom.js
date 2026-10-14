@@ -347,18 +347,49 @@
   }
 
   /**
+   * Localiza containers internos roláveis (ex.: feed imersivo da central de
+   * moedas, onde o scroll não ocorre no document.scrollingElement).
+   * @returns {Element[]}
+   */
+  function findInnerScrollers() {
+    const out = [];
+    let candidates;
+    try {
+      candidates = document.querySelectorAll(
+        '[class*="aecoin-"], [class*="feed"], [class*="scroll"], main, section'
+      );
+    } catch {
+      return out;
+    }
+    let checked = 0;
+    for (const el of candidates) {
+      checked += 1;
+      if (checked > 200) break;
+      if (el.scrollHeight > el.clientHeight + 40 && el.clientHeight > 100) {
+        out.push(el);
+      }
+    }
+    return out;
+  }
+
+  /**
    * Rola a página por `seconds` segundos (scroll incremental), com abort flag.
+   * Rola tanto a janela quanto containers internos roláveis (modo imersivo).
    * Retorna false se interrompido pela flag.
    */
   async function scrollFor(seconds, isAborted) {
     const end = Date.now() + Math.max(1, seconds) * 1000;
     const scroller = document.scrollingElement || document.documentElement;
+    const innerScrollers = findInnerScrollers();
     while (Date.now() < end) {
       if (isAborted && isAborted()) return false;
       const step = 250 + Math.floor(Math.random() * 450);
       try {
         window.scrollBy(0, step);
         if (scroller && scroller !== document.scrollingElement) scroller.scrollTop += step;
+        for (const inner of innerScrollers) {
+          inner.scrollTop += step;
+        }
       } catch {
         // segue
       }

@@ -34,7 +34,37 @@ function dotKind(phase, active) {
 async function refresh() {
   const data = await chrome.runtime.sendMessage({ type: MSG.GET_OVERVIEW }).catch(() => null);
   if (!data || !data.ok) return;
-  const { settings, runState, lastReport, nextRunAt, blockedUntil } = data;
+  const { settings, runState, lastReport, lastStreak, nextRunAt, blockedUntil } = data;
+
+  // Chips rápidos de saldo e sequência no topo
+  const latestBalance =
+    lastReport && Number.isFinite(lastReport.balanceAfter)
+      ? lastReport.balanceAfter
+      : lastReport && Number.isFinite(lastReport.balanceBefore)
+        ? lastReport.balanceBefore
+        : null;
+  const latestStreak =
+    lastReport && lastReport.checkin && Number.isFinite(lastReport.checkin.streak)
+      ? lastReport.checkin.streak
+      : Number.isFinite(lastStreak)
+        ? lastStreak
+        : null;
+
+  const metricBalance = $('metricBalance');
+  const metricStreak = $('metricStreak');
+  if (latestBalance !== null) {
+    metricBalance.textContent = `🪙 ${latestBalance} moedas`;
+    metricBalance.classList.remove('hidden');
+  } else {
+    metricBalance.classList.add('hidden');
+  }
+  if (latestStreak !== null) {
+    metricStreak.textContent = `🔥 ${latestStreak} dias`;
+    metricStreak.classList.remove('hidden');
+  } else {
+    metricStreak.classList.add('hidden');
+  }
+  $('metricsBar').classList.toggle('hidden', latestBalance === null && latestStreak === null);
 
   const active = Boolean(runState && runState.active);
   const phase = (runState && runState.phase) || PHASE.IDLE;
@@ -54,7 +84,7 @@ async function refresh() {
   $('warnCredentials').classList.toggle('hidden', Boolean(settings.user && settings.hasPassword));
   $('warnBlocked').classList.toggle('hidden', !blockedUntil || blockedUntil < Date.now());
   if (blockedUntil && blockedUntil > Date.now()) {
-    $('warnBlocked').textContent = `Bloqueio anti-bot ativo. Novas tentativas liberadas após ${new Date(blockedUntil).toLocaleString('pt-BR')}.`;
+    $('warnBlockedText').textContent = `Bloqueio anti-bot ativo. Novas tentativas liberadas após ${new Date(blockedUntil).toLocaleString('pt-BR')}. `;
   }
 
   // Aviso de check-in já coletado (ao vivo durante o run ou no último relatório).
@@ -161,7 +191,7 @@ async function refresh() {
 
     const skipped = lastReport.skipped || [];
     if (skipped.length) {
-      lines.push(`Ignoradas (app): ${skipped.slice(0, 3).join('; ')}${skipped.length > 3 ? '…' : ''}`);
+      lines.push(`Ignoradas: ${skipped.slice(0, 3).join('; ')}${skipped.length > 3 ? '…' : ''}`);
     }
     if (lastReport.captchaEvents) lines.push(`Captchas: ${lastReport.captchaEvents}`);
     for (const err of (lastReport.errors || []).slice(0, 3)) lines.push(`⚠ ${err}`);
@@ -190,6 +220,11 @@ $('btnStop').addEventListener('click', async () => {
 $('btnOptions').addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
   window.close();
+});
+
+$('btnClearCooldown').addEventListener('click', async () => {
+  await chrome.runtime.sendMessage({ type: MSG.CLEAR_COOLDOWN }).catch(() => {});
+  await refresh();
 });
 
 refresh();

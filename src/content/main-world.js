@@ -17,10 +17,33 @@
 
   if (typeof navigator === 'undefined' || typeof location === 'undefined') return;
 
-  const UA =
+  const DEFAULT_UA =
     'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36';
-  const APP_VERSION =
-    '5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36';
+
+  function activeUA() {
+    try {
+      const custom = self.sessionStorage && self.sessionStorage.getItem('ac_ua');
+      if (custom && typeof custom === 'string' && custom.trim().length > 10) {
+        return custom.trim();
+      }
+    } catch (err) {
+      /* sessionStorage indisponível */
+    }
+    return DEFAULT_UA;
+  }
+
+  function activeModel(ua) {
+    const m = String(ua || '').match(/Android\s+[0-9.]+;\s*([^)]+)\)/i);
+    return m && m[1] ? m[1].trim() : 'Pixel 8';
+  }
+
+  function activePlatformVersion(ua) {
+    const m = String(ua || '').match(/Android\s+([0-9.]+)/i);
+    if (!m || !m[1]) return '14.0.0';
+    const parts = m[1].split('.');
+    while (parts.length < 3) parts.push('0');
+    return parts.slice(0, 3).join('.');
+  }
 
   function isRunTab() {
     try {
@@ -69,12 +92,12 @@
 
   const origUA = original('userAgent');
   define('userAgent', function () {
-    return isRunTab() ? UA : fallback(origUA, this);
+    return isRunTab() ? activeUA() : fallback(origUA, this);
   });
 
   const origAppVersion = original('appVersion');
   define('appVersion', function () {
-    return isRunTab() ? APP_VERSION : fallback(origAppVersion, this);
+    return isRunTab() ? activeUA().replace(/^Mozilla\//i, '') : fallback(origAppVersion, this);
   });
 
   const origPlatform = original('platform');
@@ -93,9 +116,11 @@
   });
 
   const origUAD = original('userAgentData');
-  let fakeUAD = null;
 
   function buildFakeUAD() {
+    const ua = activeUA();
+    const model = activeModel(ua);
+    const platformVersion = activePlatformVersion(ua);
     const brands = [
       { brand: 'Chromium', version: '140' },
       { brand: 'Google Chrome', version: '140' },
@@ -117,9 +142,9 @@
           brands: brands,
           fullVersionList: fullVersionList,
           mobile: true,
-          model: 'Pixel 8',
+          model: model,
           platform: 'Android',
-          platformVersion: '14.0.0',
+          platformVersion: platformVersion,
           uaFullVersion: '140.0.0.0'
         });
       },
@@ -131,7 +156,6 @@
 
   define('userAgentData', function () {
     if (!isRunTab()) return fallback(origUAD, this);
-    if (!fakeUAD) fakeUAD = buildFakeUAD();
-    return fakeUAD;
+    return buildFakeUAD();
   });
 })();

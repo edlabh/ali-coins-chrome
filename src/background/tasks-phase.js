@@ -21,6 +21,7 @@ import { applySilentEmulation } from './cdp.js';
 import { consumeItemTab } from './item-tab.js';
 import { getRunState, patchRunState } from './storage.js';
 import {
+  applyDeviceRules,
   closeOrphanTabs,
   ensureCoinPage,
   getTabUrl,
@@ -91,6 +92,8 @@ async function adoptTaskTab(ctx) {
   ctx.previousTabId = ctx.tabId;
   ctx.tabId = candidate.id;
   await patchRunState({ tabId: candidate.id, knownTabIds: [...known, candidate.id] }).catch(() => {});
+  // Inclui a aba adotada nas session rules de User-Agent/Client Hints mobile.
+  await applyDeviceRules(ctx.previousTabId, ctx.settings, [candidate.id]).catch(() => {});
   await waitTabComplete(candidate.id, 20000);
   if (ctx.settings.silentMode) {
     // Mantém a emulação de viewport na aba adotada (melhor esforço).
@@ -117,6 +120,7 @@ async function restoreTaskTab(ctx) {
     ? runState.knownTabIds.filter((id) => id !== adoptedId)
     : [];
   await patchRunState({ tabId: prevId, knownTabIds: known }).catch(() => {});
+  await applyDeviceRules(prevId, ctx.settings).catch(() => {});
   if (adoptedId) await chrome.tabs.remove(adoptedId).catch(() => {});
 }
 
@@ -175,7 +179,7 @@ async function runSurpriseTaps(ctx) {
  *  - sem navegação visível → pequena pausa.
  */
 async function settleAfterSurpriseTap(ctx, beforeUrl, feedUrl) {
-  const itemTabClosed = await consumeItemTab(ctx.windowId, { timeoutMs: 2500, graceMs: 1000 });
+  const itemTabClosed = await consumeItemTab(ctx.windowId, { timeoutMs: 2500, graceMs: 3500 });
   if (itemTabClosed) {
     await sleepAbortable(600);
     return;
@@ -183,7 +187,7 @@ async function settleAfterSurpriseTap(ctx, beforeUrl, feedUrl) {
 
   const urlNow = await getTabUrl(ctx.tabId);
   if (urlNow && urlNow !== beforeUrl) {
-    await sleepAbortable(1200); // deixa os beacons de tracking dispararem
+    await sleepAbortable(3500); // deixa os beacons de tracking de missão dispararem
     await chrome.tabs.goBack(ctx.tabId).catch(() => {});
     await waitTabComplete(ctx.tabId, 15000);
     const backUrl = await getTabUrl(ctx.tabId);

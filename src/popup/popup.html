@@ -15,6 +15,11 @@
     <button id="btnOptions" class="icon-btn" type="button" title="Opções" aria-label="Abrir opções">⚙</button>
   </header>
 
+  <section id="metricsBar" class="metrics hidden">
+    <span id="metricBalance" class="chip hidden"></span>
+    <span id="metricStreak" class="chip hidden"></span>
+  </section>
+
   <section id="status" class="card status">
     <div class="status-line">
       <span id="statusDot" class="dot idle"></span>
@@ -34,7 +39,8 @@
       ✓ O check-in de hoje <strong>já havia sido coletado</strong> — nenhuma moeda nova de check-in neste run.
     </div>
     <div id="warnBlocked" class="warn hidden">
-      Bloqueio anti-bot ativo. Execuções pausadas por precaução até o horário indicado.
+      <span id="warnBlockedText">Bloqueio anti-bot ativo. Execuções pausadas por precaução até o horário indicado.</span>
+      <button id="btnClearCooldown" class="link-btn" type="button">Liberar bloqueio agora</button>
     </div>
   </section>
 

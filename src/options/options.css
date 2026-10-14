@@ -143,10 +143,14 @@ input[type='checkbox'] {
 
 .status.ok { color: #16a34a; }
 .status.error { color: #dc2626; }
+.status.warn { color: #d97706; font-weight: 600; }
 
 .note { border-style: dashed; }
 
 .history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 10px;
 }
 

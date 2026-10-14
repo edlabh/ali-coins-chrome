@@ -44,7 +44,7 @@ export default [
   },
 
   {
-    files: ['tests/**/*.js', 'eslint.config.js', 'tools/**/*.js'],
+    files: ['tests/**/*.js', 'eslint.config.js', 'tools/**/*.js', 'tools/**/*.mjs'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'module',
@@ -55,7 +55,7 @@ export default [
   },
 
   {
-    files: ['**/*.js'],
+    files: ['**/*.js', '**/*.mjs'],
     rules: {
       // `catch {}` intencionais (degradação graciosa) são permitidos com comentário.
       'no-empty': ['error', { allowEmptyCatch: true }],

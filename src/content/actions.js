@@ -686,6 +686,30 @@
   }
 
   /**
+   * Fecha a gaveta `.e2e_task` quando ela continua aberta sobre a grade de
+   * produtos (comum ao clicar em "GO" na tarefa de surpresas na mesma página).
+   * Sem fechar a gaveta, o clique por coordenadas (CDP) atinge a gaveta que
+   * está na frente em vez do card de produto atrás dela.
+   */
+  async function closeDrawerIfOpen() {
+    if (!drawerOpen()) return false;
+    const drawer = document.querySelector(S.tasks.drawerContainer);
+    if (drawer) {
+      const closeBtn =
+        drawer.querySelector('[class*="close" i], [aria-label*="close" i], [aria-label*="fechar" i]') ||
+        queryVisible('[class*="drawer"] [class*="close" i], [class*="e2e_task"] [class*="close" i]');
+      if (closeBtn && AC.dom.isVisible(closeBtn)) {
+        await smartClick(closeBtn);
+        await sleep(400);
+        if (!drawerOpen()) return true;
+      }
+    }
+    closeModals();
+    await sleep(300);
+    return !drawerOpen();
+  }
+
+  /**
    * Toca UM item novo do feed de surpresas e retorna IMEDIATAMENTE — a
    * orquestração da navegação (abrir/fechar a ficha do produto, voltar à tela
    * inicial e repetir) fica no background, que sobrevive a navegações completas
@@ -696,6 +720,9 @@
    * @returns {Promise<{clicked: boolean, signature?: string, cards?: number}>}
    */
   async function surpriseTapNext() {
+    // Se a gaveta de tarefas permaneceu aberta sobre a central de moedas,
+    // fecha-a antes de procurar/clicar nos cards do feed.
+    await closeDrawerIfOpen();
     await waitUntil(() => queryVisible(S.tasks.productCard), { timeout: 12000, interval: 500 });
     const touched = loadTouched();
 

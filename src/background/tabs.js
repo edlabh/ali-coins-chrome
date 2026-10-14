@@ -42,11 +42,12 @@ const DNR_REQUEST_DOMAINS = [
   'alicdn.com'
 ];
 
-function dnrCondition(tabId) {
+function dnrCondition(tabIds) {
+  const list = Array.isArray(tabIds) ? tabIds.filter((id) => typeof id === 'number') : [tabIds];
   return {
     requestDomains: DNR_REQUEST_DOMAINS,
     resourceTypes: DNR_RESOURCE_TYPES,
-    tabIds: [tabId]
+    tabIds: [...new Set(list)]
   };
 }
 
@@ -147,15 +148,17 @@ export async function prepareRunTab(settings, options = {}) {
 }
 
 /**
- * Aplica as regras de rede mobile escopadas a uma aba (session rules).
+ * Aplica as regras de rede mobile escopadas a uma ou mais abas (session rules).
  * O User-Agent é obrigatório (erro descritivo se falhar); os Client Hints são
  * best-effort, pois a lista de headers modificáveis varia entre versões do Chrome
  * — uma regra inválida NÃO pode derrubar o User-Agent junto.
  * @param {number} tabId
  * @param {object} settings
+ * @param {number[]} [extraTabIds] abas adicionais (ex.: aba adotada de tarefa)
  */
-export async function applyDeviceRules(tabId, settings) {
+export async function applyDeviceRules(tabId, settings, extraTabIds = []) {
   const device = pickDevice(settings);
+  const targetTabs = [tabId, ...extraTabIds];
 
   await chrome.declarativeNetRequest
     .updateSessionRules({ removeRuleIds: [DNR_UA_RULE_ID, DNR_HINTS_RULE_ID] })
@@ -168,7 +171,7 @@ export async function applyDeviceRules(tabId, settings) {
       type: 'modifyHeaders',
       requestHeaders: [{ header: 'user-agent', operation: 'set', value: device.userAgent }]
     },
-    condition: dnrCondition(tabId)
+    condition: dnrCondition(targetTabs)
   };
 
   try {
@@ -189,7 +192,7 @@ export async function applyDeviceRules(tabId, settings) {
         { header: 'sec-ch-ua-platform', operation: 'set', value: '"Android"' }
       ]
     },
-    condition: dnrCondition(tabId)
+    condition: dnrCondition(targetTabs)
   };
 
   await chrome.declarativeNetRequest

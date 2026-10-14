@@ -18,7 +18,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * @param {{timeoutMs?: number, graceMs?: number}} [options]
  * @returns {Promise<boolean>} true quando uma aba de item foi encontrada e fechada
  */
-export async function consumeItemTab(windowId, { timeoutMs = 2500, graceMs = 1000 } = {}) {
+export async function consumeItemTab(windowId, { timeoutMs = 2500, graceMs = 3500 } = {}) {
   const runState = await getRunState();
   if (!runState || !runState.active || !windowId) return false;
 
