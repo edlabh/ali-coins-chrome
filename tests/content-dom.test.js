@@ -316,6 +316,7 @@ test('AÇÕES: surpriseTapNext toca 1 item por vez e nunca repete (sessionStorag
 
   assert.equal(first.clicked, true);
   assert.equal(first.signature, 'card-a');
+  assert.equal(first.debug.raw, 3);
   assert.equal(second.signature, 'card-b');
   assert.equal(third.signature, 'card-c');
 

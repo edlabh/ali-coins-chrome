@@ -720,8 +720,23 @@
       await scrollFor(2, isStopped);
       pickUntapped();
     }
+
+    // Diagnóstico do que existe no DOM (ajuda a distinguir "seletor errado" de
+    // "página errada" quando o feed não rende cards).
+    let allCards;
+    try {
+      allCards = Array.from(document.querySelectorAll(S.tasks.productCard));
+    } catch {
+      allCards = [];
+    }
+    const debug = {
+      raw: allCards.length,
+      visible: allCards.filter((el) => AC.dom.isVisible(el)).length,
+      samples: allCards.slice(0, 3).map((el) => String(el.className || '').slice(0, 50))
+    };
+
     if (!target) {
-      return { clicked: false, cards: feedCardCandidates().length };
+      return { clicked: false, cards: 0, debug };
     }
 
     const link = target.matches && target.matches('a') ? target : target.querySelector('a');
@@ -730,7 +745,7 @@
     await smartClick(link || target);
     touched.add(sig);
     saveTouched(touched);
-    return { clicked: true, signature: sig, cards: feedCardCandidates().length };
+    return { clicked: true, signature: sig, cards: feedCardCandidates().length, debug };
   }
 
   async function executeSearchTask(query, seconds) {

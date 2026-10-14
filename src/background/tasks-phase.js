@@ -17,8 +17,9 @@ import {
   updatePhase
 } from './context.js';
 import { commandWithCaptcha } from './gates.js';
-import { patchRunState } from './storage.js';
+import { applySilentEmulation } from './cdp.js';
 import { consumeItemTab } from './item-tab.js';
+import { getRunState, patchRunState } from './storage.js';
 import {
   closeOrphanTabs,
   ensureCoinPage,
@@ -65,6 +66,61 @@ async function safeTaskCmd(ctx, type, payload = {}) {
 }
 
 /**
+ * Adota uma ABA NOVA aberta pelo clique em "GO" como aba ativa da rodada —
+ * paridade com o `activePage = newPageOpened ?? page` do ali-coins. Sem isso, o
+ * feed/tarefa que abre em nova aba nunca era encontrado (a ação rodava na
+ * central de moedas). A aba adotada é fechada e a principal restaurada no fim
+ * da tarefa (restoreTaskTab). Retorna true quando adotou.
+ */
+async function adoptTaskTab(ctx) {
+  const runState = await getRunState();
+  const known = new Set(Array.isArray(runState?.knownTabIds) ? runState.knownTabIds : []);
+  const tabs = await chrome.tabs.query({ windowId: ctx.windowId }).catch(() => []);
+  const candidate = tabs.find(
+    (t) =>
+      t.id &&
+      t.id !== ctx.tabId &&
+      t.id !== runState?.ledgerTabId &&
+      !known.has(t.id) &&
+      isAliexpressUrl(t.url || '') &&
+      !/coin-pc-index/.test(t.url || '')
+  );
+  if (!candidate) return false;
+
+  ctx.taskTabId = candidate.id;
+  ctx.previousTabId = ctx.tabId;
+  ctx.tabId = candidate.id;
+  await patchRunState({ tabId: candidate.id, knownTabIds: [...known, candidate.id] }).catch(() => {});
+  await waitTabComplete(candidate.id, 20000);
+  if (ctx.settings.silentMode) {
+    // Mantém a emulação de viewport na aba adotada (melhor esforço).
+    await applySilentEmulation(candidate.id, ctx.settings).catch(() => {});
+  }
+  await sleepAbortable(900);
+  await appendLog(ctx, 'Tarefa aberta em nova aba — adotada para a execução da rodada.');
+  return true;
+}
+
+/**
+ * Restaura a aba principal e fecha a aba adotada pela tarefa (fim da rodada).
+ */
+async function restoreTaskTab(ctx) {
+  if (!ctx.previousTabId) return;
+  const adoptedId = ctx.taskTabId;
+  const prevId = ctx.previousTabId;
+  ctx.taskTabId = null;
+  ctx.previousTabId = null;
+  ctx.tabId = prevId;
+
+  const runState = await getRunState();
+  const known = Array.isArray(runState?.knownTabIds)
+    ? runState.knownTabIds.filter((id) => id !== adoptedId)
+    : [];
+  await patchRunState({ tabId: prevId, knownTabIds: known }).catch(() => {});
+  if (adoptedId) await chrome.tabs.remove(adoptedId).catch(() => {});
+}
+
+/**
  * Tarefa de surpresas (paridade com o ali-coins): 3 toques por rodada, com
  * retorno à tela do feed entre eles. A navegação (aba de item, voltar) é
  * tratada aqui no background — o content script morre em navegações completas.
@@ -73,6 +129,7 @@ async function safeTaskCmd(ctx, type, payload = {}) {
  */
 async function runSurpriseTaps(ctx) {
   const feedUrl = await getTabUrl(ctx.tabId);
+  await appendLog(ctx, `Surpresas: rodada em ${truncate(feedUrl || '', 80)}.`);
   let clicked = 0;
   let feedReloaded = false;
 
@@ -82,6 +139,13 @@ async function runSurpriseTaps(ctx) {
 
     let res = await safeTaskCmd(ctx, CMD.SURPRISE_TAP, {});
     if (res === null) break; // página sem content script: já voltamos à central
+
+    if (i === 0 && res.debug) {
+      await appendLog(
+        ctx,
+        `Feed de surpresas: ${res.debug.raw} card(s) no DOM (${res.debug.visible} visíveis).`
+      );
+    }
 
     if (!res.clicked) {
       // Sem item novo: recarrega o feed UMA vez para buscar cards diferentes.
@@ -299,27 +363,36 @@ export async function runTasksPhase(ctx) {
       continue;
     }
 
+    // O clique em "GO" pode abrir a tarefa/feed numa ABA NOVA (na referência:
+    // `activePage = newPageOpened ?? page`). Adota a aba para a rodada; ela é
+    // fechada e a principal restaurada no finally.
+    await adoptTaskTab(ctx);
+
     const seconds = next.scrollSeconds || settings.scrollSeconds;
     let actionRes;
-    if (next.kind === 'surprise') {
-      // Surpresas: 3 toques nesta rodada, com navegação orquestrada no
-      // background (o content script morre na navegação para a ficha do item).
-      actionRes = await runSurpriseTaps(ctx);
-    } else {
-      actionRes = await safeTaskCommand(
-        ctx,
-        CMD.RUN_ACTION,
-        { kind: next.kind, query: settings.searchQuery, seconds, navigated },
-        'action'
-      );
-      if (actionRes === null) {
-        // Página sem content script: conta a tentativa e segue (a central já
-        // foi reaberta pela recuperação).
-        attempts[key] = (attempts[key] || 0) + 1;
-        actions += 1;
-        stats.tasks.push({ title: next.title, kind: next.kind, result: 'error' });
-        continue;
+    try {
+      if (next.kind === 'surprise') {
+        // Surpresas: 3 toques nesta rodada, com navegação orquestrada no
+        // background (o content script morre na navegação para a ficha do item).
+        actionRes = await runSurpriseTaps(ctx);
+      } else {
+        actionRes = await safeTaskCommand(
+          ctx,
+          CMD.RUN_ACTION,
+          { kind: next.kind, query: settings.searchQuery, seconds, navigated },
+          'action'
+        );
+        if (actionRes === null) {
+          // Página sem content script: conta a tentativa e segue (a central já
+          // foi reaberta pela recuperação).
+          attempts[key] = (attempts[key] || 0) + 1;
+          actions += 1;
+          stats.tasks.push({ title: next.title, kind: next.kind, result: 'error' });
+          continue;
+        }
       }
+    } finally {
+      await restoreTaskTab(ctx).catch(() => {});
     }
 
     attempts[key] = (attempts[key] || 0) + 1;
