@@ -12,7 +12,7 @@ import {
   isStopRequestedNow,
   updatePhase
 } from './context.js';
-import { focusWindow } from './tabs.js';
+import { focusWindow, restoreBackgroundFocus } from './tabs.js';
 import { notifyCaptcha, setBadge } from './notify.js';
 import { patchRunState } from './storage.js';
 
@@ -40,6 +40,9 @@ export async function captchaGate(ctx, origin) {
     if (res.solved) {
       await setBadge('RUN', 'run');
       await appendLog(ctx, 'Captcha resolvido — retomando a automação.');
+      if (ctx.settings.silentMode) {
+        await restoreBackgroundFocus(ctx.windowId, ctx.tabId, ctx.userTabId);
+      }
       return;
     }
     if (res.blocked) {
@@ -69,6 +72,9 @@ export async function twoFAGate(ctx) {
     await patchRunState({}).catch(() => {}); // heartbeat anti-stale
     if (res.ok) {
       await appendLog(ctx, '2FA concluído — retomando a automação.');
+      if (ctx.settings.silentMode) {
+        await restoreBackgroundFocus(ctx.windowId, ctx.tabId, ctx.userTabId);
+      }
       return;
     }
   }

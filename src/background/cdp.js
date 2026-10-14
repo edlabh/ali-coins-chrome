@@ -16,8 +16,77 @@ import { pickDevice } from '../common/constants.js';
 
 const CDP_VERSION = '1.3';
 const attachedTabs = new Set();
+const scriptInjectedTabs = new Set();
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const NEW_DOC_STEALTH_SCRIPT = `
+(function () {
+  try {
+    self.__acRunTab = true;
+    if (self.sessionStorage) self.sessionStorage.setItem('ac_run', '1');
+  } catch (e) {
+    self.__acRunTab = true;
+  }
+  try {
+    self.open = function (url) {
+      if (url && typeof url === 'string' && url !== 'about:blank' && !/^javascript:/i.test(url)) {
+        try { location.assign(url); } catch (e) {}
+      }
+      return self;
+    };
+  } catch (e) {}
+  try {
+    if (typeof Element !== 'undefined' && Element.prototype && Element.prototype.setAttribute) {
+      var origSetAttr = Element.prototype.setAttribute;
+      Element.prototype.setAttribute = function (name, value) {
+        if (typeof name === 'string' && name.toLowerCase() === 'target' && typeof value === 'string' && value.toLowerCase() !== '_self') {
+          return origSetAttr.call(this, name, '_self');
+        }
+        return origSetAttr.call(this, name, value);
+      };
+    }
+  } catch (e) {}
+  try {
+    if (typeof HTMLAnchorElement !== 'undefined' && HTMLAnchorElement.prototype) {
+      var desc = Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'target');
+      if (desc && desc.set) {
+        Object.defineProperty(HTMLAnchorElement.prototype, 'target', {
+          configurable: true,
+          enumerable: true,
+          get: function () { return '_self'; },
+          set: function () { desc.set.call(this, '_self'); }
+        });
+      }
+      if (HTMLAnchorElement.prototype.click) {
+        var origClick = HTMLAnchorElement.prototype.click;
+        HTMLAnchorElement.prototype.click = function () {
+          try { this.setAttribute('target', '_self'); } catch (e) {}
+          return origClick.apply(this, arguments);
+        };
+      }
+    }
+  } catch (e) {}
+})();
+`;
+
+/**
+ * Garante que a aba anexada tenha o script de bloqueio de novas abas injetado
+ * antes de qualquer documento/subdomínio carregar.
+ * @param {number} tabId
+ */
+async function ensureNewDocScript(tabId) {
+  if (scriptInjectedTabs.has(tabId)) return;
+  try {
+    await chrome.debugger.sendCommand({ tabId }, 'Page.enable', {});
+    await chrome.debugger.sendCommand({ tabId }, 'Page.addScriptToEvaluateOnNewDocument', {
+      source: NEW_DOC_STEALTH_SCRIPT
+    });
+    scriptInjectedTabs.add(tabId);
+  } catch {
+    // Melhor esforço.
+  }
+}
 
 /**
  * Anexa o depurador à aba (idempotente). Retorna false quando indisponível
@@ -26,10 +95,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * @returns {Promise<boolean>}
  */
 export async function attachCdp(tabId) {
-  if (attachedTabs.has(tabId)) return true;
+  if (attachedTabs.has(tabId)) {
+    await ensureNewDocScript(tabId);
+    return true;
+  }
   try {
     await chrome.debugger.attach({ tabId }, CDP_VERSION);
     attachedTabs.add(tabId);
+    await ensureNewDocScript(tabId);
     return true;
   } catch {
     // Já anexado por este SW antes de um restart, ou anexado por outro cliente:
@@ -39,6 +112,7 @@ export async function attachCdp(tabId) {
       const target = targets.find((t) => t.tabId === tabId && t.attached);
       if (target) {
         attachedTabs.add(tabId);
+        await ensureNewDocScript(tabId);
         return true;
       }
     } catch {
@@ -54,6 +128,7 @@ export async function attachCdp(tabId) {
  */
 export function forgetCdp(tabId) {
   attachedTabs.delete(tabId);
+  scriptInjectedTabs.delete(tabId);
 }
 
 /**
@@ -62,6 +137,7 @@ export function forgetCdp(tabId) {
  */
 export async function detachCdp(tabId) {
   attachedTabs.delete(tabId);
+  scriptInjectedTabs.delete(tabId);
   try {
     await chrome.debugger.detach({ tabId });
   } catch {
@@ -97,6 +173,10 @@ export async function applySilentEmulation(tabId, settings) {
     });
     await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
     await send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    await send('Emulation.setUserAgentOverride', {
+      userAgent: device.userAgent,
+      platform: 'Linux armv8l'
+    }).catch(() => {});
     return true;
   } catch {
     return false;

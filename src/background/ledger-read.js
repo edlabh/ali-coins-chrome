@@ -7,7 +7,7 @@
 import { CMD, MYCOIN_URL } from '../common/constants.js';
 import { appendLog, sendCmd } from './context.js';
 import { patchRunState } from './storage.js';
-import { ensureLedgerTab, navigateTab } from './tabs.js';
+import { closeLedgerTab, ensureLedgerTab, navigateTab } from './tabs.js';
 
 /**
  * @param {object} ctx
@@ -18,8 +18,8 @@ export async function readLedger(ctx, label) {
   try {
     const ledgerTabId = await ensureLedgerTab(ctx.windowId);
     ctx.ledgerTabId = ledgerTabId;
-    // Registra a aba do extrato no run state: o service worker a ignora ao
-    // detectar abas de item do feed e ao limpar órfãs.
+    // Registra a aba do extrato no run state ANTES de navegar: o service worker
+    // garante que ela continue sempre em segundo plano (active: false).
     await patchRunState({ ledgerTabId }).catch(() => {});
     await navigateTab(ledgerTabId, MYCOIN_URL, 45000);
 
@@ -38,5 +38,9 @@ export async function readLedger(ctx, label) {
   } catch (err) {
     await appendLog(ctx, `Falha ao ler o extrato (${label}): ${err.message}.`);
     return null;
+  } finally {
+    ctx.ledgerTabId = null;
+    await patchRunState({ ledgerTabId: null }).catch(() => {});
+    await closeLedgerTab().catch(() => {});
   }
 }

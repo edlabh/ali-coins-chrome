@@ -91,6 +91,12 @@ async function adoptTaskTab(ctx) {
   ctx.taskTabId = candidate.id;
   ctx.previousTabId = ctx.tabId;
   ctx.tabId = candidate.id;
+  if (ctx.settings.silentMode) {
+    if (runState?.userTabId) {
+      await chrome.tabs.update(runState.userTabId, { active: true }).catch(() => {});
+    }
+    await chrome.tabs.update(candidate.id, { active: false }).catch(() => {});
+  }
   await patchRunState({ tabId: candidate.id, knownTabIds: [...known, candidate.id] }).catch(() => {});
   // Inclui a aba adotada nas session rules de User-Agent/Client Hints mobile.
   await applyDeviceRules(ctx.previousTabId, ctx.settings, [candidate.id]).catch(() => {});

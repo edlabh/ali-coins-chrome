@@ -85,8 +85,9 @@ export function summarizeTasks(tasks) {
  * v2: a janela mobile passa a ser fechada ao concluir (antes ficava aberta).
  * v3: execução em segundo plano por padrão (a aba só aparece para captcha/2FA).
  * v4: teto de ações por execução sobe de 25 (padrão antigo) para 60.
+ * v5: garante silentMode=true e keepWindowOpen=false em instalações existentes.
  */
-export const SETTINGS_VERSION = 4;
+export const SETTINGS_VERSION = 5;
 
 /**
  * Migra configurações salvas por versões anteriores.
@@ -122,6 +123,14 @@ export function migrateSettings(stored) {
     if (settings.maxTaskActions === undefined || settings.maxTaskActions === 25) {
       settings.maxTaskActions = 60;
     }
+    changed = true;
+  }
+
+  // v5: garante que execuções rodem exclusivamente em segundo plano (sem janelas
+  // ou abas em primeiro plano).
+  if (fromVersion < 5) {
+    settings.silentMode = true;
+    settings.keepWindowOpen = false;
     changed = true;
   }
 

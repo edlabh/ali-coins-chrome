@@ -2,10 +2,10 @@
  * Service worker (MV3): roteia mensagens entre popup/options, content scripts e o runner.
  */
 
-import { MSG, pickDevice } from '../common/constants.js';
+import { MSG, PHASE, pickDevice } from '../common/constants.js';
 import { startRun, requestStop } from './runner.js';
 import { installScheduler, scheduleDaily } from './scheduler.js';
-import { focusWindow, prepareRunTab } from './tabs.js';
+import { focusWindow, isAliexpressUrl, prepareRunTab } from './tabs.js';
 import { clickTrusted, forgetCdp } from './cdp.js';
 import { getRunState, getRuntime, getSettings, patchRuntime, pushReport } from './storage.js';
 
@@ -33,26 +33,94 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
   }
 });
 
-// ── Abas abertas pelo PRÓPRIO SITE durante o run (fichas de produto do feed,
-// atalhos de tarefa) não devem roubar o primeiro plano do usuário — essencial
-// no modo silencioso. Quando uma aba criada A PARTIR da aba do run é ativada,
-// devolvemos o foco à última aba do usuário (sem fechar nada; a limpeza de
-// abas órfãs cuida do resto).
+// ── Proteção rigorosa de segundo plano: nenhuma aba da extensão ou aberta
+// pelo site durante o run pode roubar o foco ou abrir em primeiro plano (a
+// menos que a fase seja CAPTCHA ou TWO_FA).
 let lastUserTabId = null;
+
+function isRunOwnedTab(tabId, tab, runState) {
+  if (!runState || !runState.active) return false;
+  if (tabId === runState.tabId || tabId === runState.ledgerTabId) return true;
+  if (
+    tab &&
+    ((runState.tabId && tab.openerTabId === runState.tabId) ||
+      (runState.ledgerTabId && tab.openerTabId === runState.ledgerTabId))
+  ) {
+    return true;
+  }
+  const known = new Set(Array.isArray(runState.knownTabIds) ? runState.knownTabIds : []);
+  const url = (tab && (tab.pendingUrl || tab.url)) || '';
+  if (!known.has(tabId) && isAliexpressUrl(url)) return true;
+  return false;
+}
+
+function shouldKeepSilent(runState) {
+  if (!runState || !runState.active) return false;
+  if (runState.silentMode === false) return false;
+  return runState.phase !== PHASE.CAPTCHA && runState.phase !== PHASE.TWO_FA;
+}
+
+chrome.tabs.onCreated.addListener(async (tab) => {
+  try {
+    if (!tab || typeof tab.id !== 'number') return;
+    const runState = await getRunState();
+    if (!runState || !runState.active) return;
+    if (tab.id === runState.tabId || tab.id === runState.ledgerTabId) return;
+
+    const spawnedByRunTab = Boolean(runState.tabId && tab.openerTabId === runState.tabId);
+    const owned = spawnedByRunTab || isRunOwnedTab(tab.id, tab, runState);
+    if (!owned) return;
+
+    // 1. Mantém o foco na aba do usuário e força a nova aba para segundo plano.
+    if (shouldKeepSilent(runState)) {
+      const targetUserTab = runState.userTabId || lastUserTabId;
+      if (targetUserTab && targetUserTab !== tab.id) {
+        await chrome.tabs.update(targetUserTab, { active: true }).catch(() => {});
+      }
+      await chrome.tabs.update(tab.id, { active: false }).catch(() => {});
+    }
+
+    // 2. Se a aba de execução abriu uma nova aba (apesar do bloqueio de
+    // window.open/target="_blank"), transfere a URL para a própria aba de
+    // fundo (runState.tabId) e fecha a aba extra imediatamente.
+    if (spawnedByRunTab && runState.tabId) {
+      let targetUrl = tab.pendingUrl || tab.url || '';
+      if (!targetUrl || targetUrl === 'about:blank') {
+        for (let i = 0; i < 6; i += 1) {
+          await new Promise((r) => setTimeout(r, 120));
+          const fresh = await chrome.tabs.get(tab.id).catch(() => null);
+          if (!fresh) return;
+          targetUrl = fresh.pendingUrl || fresh.url || '';
+          if (targetUrl && targetUrl !== 'about:blank') break;
+        }
+      }
+      await chrome.tabs.remove(tab.id).catch(() => {});
+      if (targetUrl && targetUrl !== 'about:blank') {
+        await chrome.tabs.update(runState.tabId, { url: targetUrl, active: false }).catch(() => {});
+      }
+    }
+  } catch {
+    // Aba já fechada: ignora.
+  }
+});
+
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   try {
     const runState = await getRunState();
-    if (!runState || !runState.active || tabId === runState.tabId) {
+    if (!runState || !runState.active) {
       lastUserTabId = tabId;
       return;
     }
     const tab = await chrome.tabs.get(tabId).catch(() => null);
-    if (tab && runState.tabId && tab.openerTabId === runState.tabId) {
-      const target = lastUserTabId || runState.userTabId;
-      if (target && target !== tabId) {
-        chrome.tabs.update(target, { active: true }).catch(() => {});
+    if (isRunOwnedTab(tabId, tab, runState)) {
+      if (shouldKeepSilent(runState)) {
+        const target = runState.userTabId || lastUserTabId;
+        if (target && target !== tabId) {
+          await chrome.tabs.update(target, { active: true }).catch(() => {});
+        }
+        await chrome.tabs.update(tabId, { active: false }).catch(() => {});
       }
-      return; // não memoriza a aba automática do site
+      return; // nunca memoriza abas do run como aba do usuário
     }
     lastUserTabId = tabId;
   } catch {

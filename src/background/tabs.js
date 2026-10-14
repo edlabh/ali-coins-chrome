@@ -8,7 +8,7 @@
  *  - locale pt-BR herdado do perfil do usuário.
  */
 
-import { COIN_URL, COIN_URL_TASKS, MYCOIN_URL, pickDevice } from '../common/constants.js';
+import { COIN_URL, COIN_URL_TASKS, pickDevice } from '../common/constants.js';
 
 const DNR_UA_RULE_ID = 9001;
 const DNR_HINTS_RULE_ID = 9002;
@@ -71,10 +71,20 @@ async function ensureRunWindow(settings, { forceVisible = false } = {}) {
       const tab = await chrome.tabs.get(runtimeRef.tabId);
       const url = (tab && tab.url) || '';
       if (tab && tab.windowId && (isAliexpressUrl(url) || isBlankUrl(url))) {
-        if (!silent) {
-          await chrome.windows.update(tab.windowId, { focused: true });
+        const win = await chrome.windows.get(tab.windowId).catch(() => null);
+        // Em modo silencioso, NUNCA reutiliza uma janela popup (sem barra de
+        // abas: cliques do site dentro de popup são abertos pelo Chrome como
+        // novas abas em primeiro plano na janela normal do usuário).
+        if (silent && win && win.type !== 'normal') {
+          await chrome.windows.remove(win.id).catch(() => {});
+        } else {
+          if (!silent) {
+            await chrome.windows.update(tab.windowId, { focused: true });
+          } else if (tab.active) {
+            await chrome.tabs.update(tab.id, { active: false }).catch(() => {});
+          }
+          return { windowId: tab.windowId, tabId: tab.id, reused: true };
         }
-        return { windowId: tab.windowId, tabId: tab.id, reused: true };
       }
     } catch {
       // Aba sumiu: recria abaixo.
@@ -113,7 +123,7 @@ async function ensureRunWindow(settings, { forceVisible = false } = {}) {
  */
 async function findAnchorWindow() {
   try {
-    const win = await chrome.windows.getLastFocused({ populate: false });
+    const win = await chrome.windows.getLastFocused({ populate: false, windowTypes: ['normal'] });
     if (win && typeof win.id === 'number') return win.id;
   } catch {
     // segue
@@ -124,24 +134,31 @@ async function findAnchorWindow() {
   } catch {
     // segue
   }
-  const created = await chrome.windows.create({ url: 'about:blank', state: 'minimized' });
+  const created = await chrome.windows.create({
+    url: 'about:blank',
+    state: 'minimized',
+    focused: false
+  });
   return created.id;
 }
 
 /**
  * Prepara a aba de execução na ordem correta:
  *   1. garante a janela popup (Pixel 8) ou a aba de fundo (modo silencioso);
- *   2. aplica as regras de User-Agent/Client Hints mobile na aba;
- *   3. navega (ou recarrega) SEMPRE para a central de moedas com o hash
+ *   2. executa `onTabCreated` (registra runState e anexa CDP ainda em about:blank);
+ *   3. aplica as regras de User-Agent/Client Hints mobile na aba;
+ *   4. navega (ou recarrega) SEMPRE para a central de moedas com o hash
  *      `#ac_run=1`, que o content script usa para marcar a aba e é removido logo
- *      depois. Recarregar mesmo em abas já abertas garante que uma página antiga
- *      carregada em desktop seja substituída pela variante mobile.
+ *      depois.
  * @param {object} settings
- * @param {{forceVisible?: boolean}} [options]
+ * @param {{forceVisible?: boolean, onTabCreated?: (win: {windowId: number, tabId: number, reused: boolean}) => Promise<void>}} [options]
  * @returns {Promise<{windowId: number, tabId: number, reused: boolean}>}
  */
 export async function prepareRunTab(settings, options = {}) {
   const win = await ensureRunWindow(settings, options);
+  if (typeof options.onTabCreated === 'function') {
+    await options.onTabCreated(win);
+  }
   await applyDeviceRules(win.tabId, settings);
   await navigateTab(win.tabId, `${COIN_URL}#ac_run=1`, 45000);
   return win;
@@ -292,7 +309,7 @@ export async function ensureLedgerTab(windowId) {
     }
   }
 
-  const tab = await chrome.tabs.create({ windowId, url: MYCOIN_URL, active: false });
+  const tab = await chrome.tabs.create({ windowId, url: 'about:blank', active: false });
   await chrome.storage.session.set({ [LEDGER_TAB_KEY]: { tabId: tab.id, windowId } });
   return tab.id;
 }
@@ -331,6 +348,32 @@ export async function focusWindow(windowId, tabId = null) {
     } catch {
       // Ignora aba fechada.
     }
+  }
+}
+
+/**
+ * Devolve a aba de execução ao segundo plano após o usuário resolver um
+ * captcha/2FA no modo silencioso, reativando a aba original do usuário.
+ * @param {number} windowId
+ * @param {number} runTabId
+ * @param {number|null} [userTabId]
+ */
+export async function restoreBackgroundFocus(windowId, runTabId, userTabId = null) {
+  try {
+    let targetId = userTabId;
+    if (!targetId && windowId) {
+      const tabs = await chrome.tabs.query({ windowId }).catch(() => []);
+      const other = tabs.find((t) => t.id && t.id !== runTabId && !isAliexpressUrl(t.url || ''));
+      if (other) targetId = other.id;
+    }
+    if (targetId && targetId !== runTabId) {
+      await chrome.tabs.update(targetId, { active: true }).catch(() => {});
+    }
+    if (runTabId) {
+      await chrome.tabs.update(runTabId, { active: false }).catch(() => {});
+    }
+  } catch {
+    // Ignora aba/janela fechada.
   }
 }
 
@@ -379,8 +422,8 @@ export async function getTabUrl(tabId) {
 export async function ensureCoinPage(ctx, force = false) {
   const url = await getTabUrl(ctx.tabId);
   if (!isCoinUrl(url) || force) {
-    await navigateTab(ctx.tabId, COIN_URL_TASKS);
     await applyDeviceRules(ctx.tabId, ctx.settings);
+    await navigateTab(ctx.tabId, `${COIN_URL_TASKS}#ac_run=1`);
   }
 }
 

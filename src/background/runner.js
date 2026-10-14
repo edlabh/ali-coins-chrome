@@ -131,6 +131,7 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
       active: true,
       runId,
       reason,
+      silentMode: Boolean(settings.silentMode),
       phase: PHASE.STARTING,
       message: 'Preparando janela mobile…',
       startedAt,
@@ -186,59 +187,60 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
 
     if (await isStopRequestedNow()) throw new RunAbortedError();
 
-    // 1. Janela + regras de rede (Pixel 8) + primeira navegação JÁ em mobile.
-    const win = await prepareRunTab(ctx.settings);
+    // 1. Janela/aba de fundo + snapshot de abas + CDP (viewport 412×915 e
+    // bloqueio de window.open/target="_blank") ANTES da primeira navegação,
+    // para que nenhuma aba apareça em primeiro plano e o primeiro load já seja mobile.
+    let cdpReady = false;
+    let emuOk = false;
+    const win = await prepareRunTab(ctx.settings, {
+      onTabCreated: async (createdWin) => {
+        ctx.windowId = createdWin.windowId;
+        ctx.tabId = createdWin.tabId;
+        try {
+          const windowTabs = await chrome.tabs.query({ windowId: ctx.windowId });
+          ctx.knownTabIds = new Set(windowTabs.map((t) => t.id).filter(Boolean));
+        } catch {
+          ctx.knownTabIds = new Set();
+        }
+        let userTabId = null;
+        try {
+          const activeTabs = await chrome.tabs.query({ active: true, windowId: ctx.windowId });
+          const other = activeTabs.find((t) => t.id && t.id !== ctx.tabId);
+          userTabId = other ? other.id : null;
+        } catch {
+          // mantém null
+        }
+        ctx.userTabId = userTabId;
+        await patchRunState({
+          tabId: ctx.tabId,
+          windowId: ctx.windowId,
+          knownTabIds: [...ctx.knownTabIds],
+          userTabId
+        });
+
+        cdpReady = await attachCdp(ctx.tabId).catch(() => false);
+        if (ctx.settings.silentMode && cdpReady) {
+          emuOk = await applySilentEmulation(ctx.tabId, ctx.settings).catch(() => false);
+        }
+      }
+    });
     ctx.windowId = win.windowId;
     ctx.tabId = win.tabId;
-    await patchRunState({ tabId: ctx.tabId, windowId: ctx.windowId });
+
     await appendLog(
       ctx,
       ctx.settings.silentMode
-        ? 'Modo silencioso: execução em segundo plano (nenhuma janela foi aberta).'
+        ? 'Modo silencioso: execução em segundo plano (nenhuma janela/aba em primeiro plano).'
         : 'Janela mobile (Pixel 8) preparada com as regras de User-Agent.'
     );
-
-    // Snapshot das abas da janela: a limpeza de abas órfãs só fecha o que foi
-    // criado DURANTE o run — nunca abas pessoais (essencial no modo silencioso,
-    // que compartilha uma janela normal do usuário).
-    try {
-      const windowTabs = await chrome.tabs.query({ windowId: ctx.windowId });
-      ctx.knownTabIds = new Set(windowTabs.map((t) => t.id).filter(Boolean));
-    } catch {
-      ctx.knownTabIds = new Set();
-    }
-
-    // Registra no run state o snapshot de abas e a aba "do usuário" (em modo
-    // silencioso, a aba ativa da janela que NÃO é a de execução): o service
-    // worker usa isso para fechar apenas abas criadas durante o run e para
-    // devolver o foco ao usuário quando o site abre abas em primeiro plano.
-    let userTabId = null;
-    try {
-      const activeTabs = await chrome.tabs.query({ active: true, windowId: ctx.windowId });
-      const other = activeTabs.find((t) => t.id && t.id !== ctx.tabId);
-      userTabId = other ? other.id : null;
-    } catch {
-      userTabId = null;
-    }
-    await patchRunState({ knownTabIds: [...ctx.knownTabIds], userTabId });
-
-    // Cliques reais via CDP (isTrusted): o AliExpress ignora eventos sintéticos
-    // em alguns botões (ex.: o painel "Ganhe mais moedas" não abria). O aviso de
-    // depuração do Chrome aparece na janela; se indisponível, o content script
-    // cai no fallback sintético sozinho.
-    const cdpReady = await attachCdp(ctx.tabId).catch(() => false);
     await appendLog(
       ctx,
       cdpReady
         ? 'Cliques confiáveis (CDP) ativos para esta execução.'
         : 'CDP indisponível (aviso de depuração cancelado?) — usando eventos sintéticos como fallback.'
     );
-
-    // Modo silencioso: emula a viewport do aparelho na aba de fundo via CDP
-    // (o layout renderiza em 412×915 mesmo oculto numa janela desktop).
     if (ctx.settings.silentMode) {
       if (cdpReady) {
-        const emuOk = await applySilentEmulation(ctx.tabId, ctx.settings).catch(() => false);
         await appendLog(
           ctx,
           emuOk
