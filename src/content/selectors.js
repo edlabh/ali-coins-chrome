@@ -68,7 +68,8 @@
       openDrawerBtn:
         'button[class*="aecoin-taskButton"], [class*="taskButton"], [class*="signButtonWrapper"] button, div[class*="aecoin-signButton"], [class*="aecoin-signButton"]',
       openDrawerTexts: [/earn more coins/i, /ganhe mais moedas/i, /mais moedas/i],
-      productCard: '.feeds-discount-card',
+      productCard:
+        '[class*="aecoin-feedlist-card"], [class*="feedlist-card"], .feeds-discount-card, [id^="coin-feeds-product"]',
       searchInput:
         'input[type="search"], input[name*="SearchText" i], input[placeholder*="search" i], input[aria-label*="search" i], input[name*="search" i]'
     },

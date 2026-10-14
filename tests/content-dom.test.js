@@ -289,6 +289,21 @@ test('AÇÕES: readMycoin lê o extrato composto da página mycoin', async () =>
   assert.deepEqual({ ...(await page.AC.actions.readMycoin()) }, { error: 'not-mycoin-page' });
 });
 
+test('AÇÕES: listFeedCards encontra os cards reais do feed (exclui subpartes e wrappers)', () => {
+  const env = createContentEnv(`
+    <div class="aecoin-feedlist-card-wrapper">
+      <div class="aecoin-feedlist-card-sSnlv" data-item-id="card-a">
+        <div class="aecoin-feedlist-card-img-x"></div>
+        <div class="aecoin-feedlist-card-bubble"><span class="feedlist-card-bubble-num">+5</span></div>
+      </div>
+      <div class="aecoin-feedlist-card-sSnlv" data-item-id="card-b"><a href="/item/2">x</a></div>
+    </div>
+    <div class="feeds-discount-card" data-item-id="card-c"></div>
+  `);
+  const sigs = env.AC.actions.listFeedCards();
+  assert.deepEqual([...sigs], ['card-a', 'card-b', 'card-c']);
+});
+
 // ---------------------------------------------------------------------------
 // Painel de tarefas (actions.js)
 // ---------------------------------------------------------------------------

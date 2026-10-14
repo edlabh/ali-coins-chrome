@@ -56,6 +56,7 @@ export const CMD = Object.freeze({
 export const MSG = Object.freeze({
   CONTENT_READY: 'CONTENT_READY',
   TRUSTED_CLICK: 'TRUSTED_CLICK',
+  HANDLE_ITEM_TAB: 'HANDLE_ITEM_TAB',
   GET_OVERVIEW: 'GET_OVERVIEW',
   RUN_NOW: 'RUN_NOW',
   STOP_RUN: 'STOP_RUN',

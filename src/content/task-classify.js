@@ -46,26 +46,25 @@
       return 'search';
     }
 
+    const both = `${t} ${d}`;
+
+    // Prize Land e itens de US$0,10 (exigem app): título OU descrição, com
+    // suporte à vírgula decimal ("US$0,10") além do ponto.
     if (
-      t.includes('prize land') ||
-      d.includes('prize land') ||
-      d.includes('water') ||
-      d.includes('regar') ||
-      t.includes('0.1')
+      both.includes('prize land') ||
+      both.includes('water') ||
+      both.includes('regar') ||
+      /0[.,]1(\b|[0-9])/.test(both)
     ) {
       return 'prize-land';
     }
 
-    if (
-      t.includes('merge boss') ||
-      t.includes('game') ||
-      t.includes('jogo') ||
-      t.includes('quiz')
-    ) {
+    // Minigames, quizzes e desafios exclusivos do app (título OU descrição).
+    if (/merge ?boss|minigame|mini ?jogo|quiz|jogo|game|desafio|challenge/.test(both)) {
       return 'app-only';
     }
 
-    if (t.includes('review') || t.includes('avalia') || d.includes('review') || d.includes('avalia')) {
+    if (both.includes('review') || both.includes('avalia')) {
       return 'app-only';
     }
 

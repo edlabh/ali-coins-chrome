@@ -192,6 +192,20 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
       ctx.knownTabIds = new Set();
     }
 
+    // Registra no run state o snapshot de abas e a aba "do usuário" (em modo
+    // silencioso, a aba ativa da janela que NÃO é a de execução): o service
+    // worker usa isso para fechar apenas abas criadas durante o run e para
+    // devolver o foco ao usuário quando o site abre abas em primeiro plano.
+    let userTabId = null;
+    try {
+      const activeTabs = await chrome.tabs.query({ active: true, windowId: ctx.windowId });
+      const other = activeTabs.find((t) => t.id && t.id !== ctx.tabId);
+      userTabId = other ? other.id : null;
+    } catch {
+      userTabId = null;
+    }
+    await patchRunState({ knownTabIds: [...ctx.knownTabIds], userTabId });
+
     // Cliques reais via CDP (isTrusted): o AliExpress ignora eventos sintéticos
     // em alguns botões (ex.: o painel "Ganhe mais moedas" não abria). O aviso de
     // depuração do Chrome aparece na janela; se indisponível, o content script

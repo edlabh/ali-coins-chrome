@@ -268,6 +268,13 @@ test('classifyTask identifica surpresa, busca, prize-land e app-only', () => {
   assert.equal(classifyTask('Merge Boss game', ''), 'app-only');
   assert.equal(classifyTask('Avaliar pedido', 'Review'), 'app-only');
   assert.equal(classifyTask('Assistir ofertas', 'Navegue por 15s'), 'scroll');
+
+  // Exemplos reais reportados (contas novas): tarefas exclusivas do app e a de
+  // US$0,10 com VÍRGULA decimal precisam ser barradas.
+  assert.equal(classifyTask('Desafio diário do quiz', ''), 'app-only');
+  assert.equal(classifyTask('Conclua 1 pedido do jogo Merge Boss', ''), 'app-only');
+  assert.equal(classifyTask('Ganhe Itens de US$0,10', ''), 'prize-land');
+  assert.equal(classifyTask('', 'Complete o desafio no app'), 'app-only');
 });
 
 test('scrollSecondsForTask garante 16s em super descontos', () => {

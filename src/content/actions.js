@@ -664,73 +664,93 @@
     return dataId || href || text || src || `card-idx-${idx}`;
   }
 
+  /**
+   * Cards do feed de surpresas com os seletores REAIS da central mobile
+   * (`aecoin-feedlist-card-*` + `#coin-feeds-product-*`; `.feeds-discount-card`
+   * fica como fallback legado). Exclui subpartes (imagem/balão/texto) e mantém
+   * apenas o card mais interno de cada item (evita wrapper com vários cards).
+   */
+  function feedCardCandidates() {
+    let els;
+    try {
+      els = Array.from(document.querySelectorAll(S.tasks.productCard));
+    } catch {
+      return [];
+    }
+    const cards = els.filter((el) => {
+      const cls = typeof el.className === 'string' ? el.className : '';
+      if (/feedlist-card-(img|bubble|text|num|title|icon)/i.test(cls)) return false;
+      return AC.dom.isVisible(el);
+    });
+    return cards.filter((el) => !cards.some((other) => other !== el && el.contains(other)));
+  }
+
+  /**
+   * Delega ao background a checagem de ABA de item aberta pelo card: o service
+   * worker aguarda a aba aparecer, dá um tempo para os beacons de tracking e a
+   * fecha — o equivalente ao waitForEvent('page') + close do ali-coins.
+   */
+  async function consumeItemTabIfAny() {
+    const res = await chrome.runtime
+      .sendMessage({ type: 'HANDLE_ITEM_TAB', payload: { graceMs: 1000, timeoutMs: 2500 } })
+      .catch(() => null);
+    return Boolean(res && res.closed);
+  }
+
   async function surpriseTaps(seconds) {
-    const cardsSel = S.tasks.productCard;
-    await waitUntil(() => queryVisible(cardsSel), { timeout: 12000, interval: 500 });
+    await waitUntil(() => queryVisible(S.tasks.productCard), { timeout: 12000, interval: 500 });
     const touched = loadTouched();
-    const startUrl = location.href;
     let clicked = 0;
 
     for (let i = 0; i < 3; i += 1) {
       if (isStopped()) break;
-      let cards = Array.from(document.querySelectorAll(cardsSel)).filter((e) => AC.dom.isVisible(e));
-      if (cards.length === 0) {
-        await sleep(1200);
-        cards = Array.from(document.querySelectorAll(cardsSel)).filter((e) => AC.dom.isVisible(e));
-      }
-      if (cards.length === 0) break;
 
       let target = null;
       let sig = '';
-      for (let idx = 0; idx < cards.length; idx += 1) {
-        const s = cardSignature(cards[idx], idx);
-        if (!touched.has(s)) {
-          target = cards[idx];
-          sig = s;
-          break;
-        }
-      }
-      if (!target) {
-        // Todos tocados nesta página: rola para carregar novos itens.
-        await scrollFor(2, isStopped);
-        cards = Array.from(document.querySelectorAll(cardsSel)).filter((e) => AC.dom.isVisible(e));
+      const pickUntapped = () => {
+        const cards = feedCardCandidates();
         for (let idx = 0; idx < cards.length; idx += 1) {
           const s = cardSignature(cards[idx], idx);
           if (!touched.has(s)) {
             target = cards[idx];
             sig = s;
-            break;
+            return true;
           }
         }
+        return false;
+      };
+
+      pickUntapped();
+      if (!target) {
+        // Sem card novo: rola para carregar mais itens (como o ali-coins).
+        await scrollFor(Math.max(2, Math.min(4, seconds || 2)), isStopped);
+        pickUntapped();
       }
       if (!target) break;
 
-      // Evita novas abas: força target=_self no link interno quando existir.
+      const beforeUrl = location.href;
       const link = target.matches && target.matches('a') ? target : target.querySelector('a');
-      if (link) {
-        try {
-          link.target = '_self';
-        } catch {
-          // atributo pode ser somente leitura em casos raros
-        }
-      }
 
+      // O site abre a ficha do produto em NOVA ABA (fluxo esperado pelo
+      // ali-coins). NÃO forçamos target=_self: o background detecta a aba,
+      // aguarda os beacons e a fecha — e o modo silencioso devolve o foco ao
+      // usuário em vez de deixar a aba aparecer em primeiro plano.
       await smartClick(link || target);
       touched.add(sig);
       saveTouched(touched);
       clicked += 1;
-      await sleep(1600);
 
-      if (location.href !== startUrl) {
-        // Navegou para a ficha do produto: permanece, rola e volta ao feed.
-        await scrollFor(Math.max(3, Math.min(6, seconds || 4)), isStopped);
+      const itemTabClosed = await consumeItemTabIfAny();
+      if (!itemTabClosed && location.href !== beforeUrl) {
+        // Sem aba nova: a PRÓPRIA página navegou para a ficha do produto.
+        await sleep(1000);
         history.back();
         await waitUntil(
-          () => location.href === startUrl || Boolean(queryVisible(cardsSel)),
+          () => location.href === beforeUrl || feedCardCandidates().length > 0,
           { timeout: 8000, interval: 400 }
         );
-        await sleep(1200);
       }
+      await sleep(600);
     }
     return { ok: clicked > 0, clicked };
   }
@@ -784,6 +804,7 @@
     readBalance: () => ({ ...readBalance(), streak: readStreak(), todayChecked: todayChecked() }),
     openDrawer,
     extractTasks,
+    listFeedCards: () => feedCardCandidates().map((el, idx) => cardSignature(el, idx)),
     clickTask,
     runAction,
     coinUiPresent
