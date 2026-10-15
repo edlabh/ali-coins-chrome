@@ -304,15 +304,17 @@ test('AÇÕES: listFeedCards encontra os cards reais do feed (exclui subpartes e
   assert.deepEqual([...sigs], ['card-a', 'card-b', 'card-c']);
 });
 
-test('AÇÕES: surpriseTapNext toca 1 item por vez e nunca repete (sessionStorage)', async () => {
+test('AÇÕES: surpriseTapNext toca 1 item por vez e respeita a lista de exclusão', async () => {
   const env = createContentEnv(`
     <div class="aecoin-feedlist-card-sSnlv" data-item-id="card-a"></div>
     <div class="aecoin-feedlist-card-sSnlv" data-item-id="card-b"></div>
     <div class="aecoin-feedlist-card-sSnlv" data-item-id="card-c"></div>
   `);
-  const first = await env.AC.actions.surpriseTapNext();
-  const second = await env.AC.actions.surpriseTapNext();
-  const third = await env.AC.actions.surpriseTapNext();
+  const first = await env.AC.actions.surpriseTapNext({ exclude: [] });
+  const second = await env.AC.actions.surpriseTapNext({ exclude: [first.signature] });
+  const third = await env.AC.actions.surpriseTapNext({
+    exclude: [first.signature, second.signature]
+  });
 
   assert.equal(first.clicked, true);
   assert.equal(first.signature, 'card-a');
@@ -320,8 +322,10 @@ test('AÇÕES: surpriseTapNext toca 1 item por vez e nunca repete (sessionStorag
   assert.equal(second.signature, 'card-b');
   assert.equal(third.signature, 'card-c');
 
-  // Sem itens novos: rola e devolve clicked=false — itens nunca se repetem.
-  const fourth = await env.AC.actions.surpriseTapNext();
+  // Todos excluídos: rola e devolve clicked=false — itens nunca se repetem.
+  const fourth = await env.AC.actions.surpriseTapNext({
+    exclude: [first.signature, second.signature, third.signature]
+  });
   assert.equal(fourth.clicked, false);
 });
 

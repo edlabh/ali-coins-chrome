@@ -8,6 +8,14 @@ import { getSettings, saveSettings, patchRuntime, getRuntime } from '../backgrou
 
 const $ = (id) => document.getElementById(id);
 
+// Mostra a versão da extensão ao lado do nome (ex.: "Ali Coins — Opções v0.4.6").
+try {
+  const versionEl = $('appVersion');
+  if (versionEl) versionEl.textContent = `v${chrome.runtime.getManifest().version}`;
+} catch {
+  // getManifest indisponível: segue sem a versão
+}
+
 function runSummaryLine(run) {
   const when = run.startedAt ? new Date(run.startedAt).toLocaleString('pt-BR') : '—';
   const bits = [when, statusLabel(run.status)];

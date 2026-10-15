@@ -28,7 +28,7 @@ import {
 import { commandWithCaptcha } from './gates.js';
 import { applySilentEmulation } from './cdp.js';
 import { consumeItemTab } from './item-tab.js';
-import { getRunState, patchRunState } from './storage.js';
+import { getRunState, getSurpriseTapped, patchRunState, saveSurpriseTapped } from './storage.js';
 import {
   applyDeviceRules,
   closeOrphanTabs,
@@ -171,20 +171,34 @@ async function restoreTaskTab(ctx) {
  * Tarefa de surpresas (paridade com o ali-coins): 3 toques por rodada, com
  * retorno à tela do feed entre eles. A navegação (aba de item, voltar) é
  * tratada aqui no background — o content script morre em navegações completas.
- * Itens nunca se repetem (sessionStorage no content + retomada da rodada).
+ * Itens tocados NUNCA se repetem e a memória é DIÁRIA e persistente (storage),
+ * como o arquivo por dia da referência: repetições não contam progresso.
+ *
+ * Fallback de detalhe (como o SURPRISE_DETAIL_FALLBACK do ali-coins): se os
+ * toques não abriram NENHUMA ficha, o site pode exigir abrir o DETALHE do
+ * produto para contabilizar a rodada — abre 1 card ainda não tocado e espera.
  * @returns {Promise<{ok: boolean, clicked: number}>}
  */
 async function runSurpriseTaps(ctx) {
   const feedUrl = await getTabUrl(ctx.tabId);
   await appendLog(ctx, `Surpresas: rodada em ${truncate(feedUrl || '', 80)}.`);
+  // Memória do dia (persistente entre execuções) + tentativas desta rodada:
+  // um card que não abriu ficha NÃO é marcado no dia (fica elegível de novo na
+  // próxima rodada/execução), mas não é re-selecionado na MESMA rodada.
+  const daily = await getSurpriseTapped().catch(() => new Set());
+  const attempted = new Set();
   let clicked = 0;
+  let openedAny = false;
   let feedReloaded = false;
+
+  const tapOnce = async () =>
+    safeTaskCmd(ctx, CMD.SURPRISE_TAP, { exclude: [...daily, ...attempted] });
 
   for (let i = 0; i < 3; i += 1) {
     if (await isStopRequestedNow()) throw new RunAbortedError();
     const beforeUrl = await getTabUrl(ctx.tabId);
 
-    let res = await safeTaskCmd(ctx, CMD.SURPRISE_TAP, {});
+    let res = await safeTaskCmd(ctx, CMD.SURPRISE_TAP, { exclude: [...daily, ...attempted] });
     if (res === null) break; // página sem content script: já voltamos à central
 
     if (i === 0 && res.debug) {
@@ -200,7 +214,7 @@ async function runSurpriseTaps(ctx) {
         feedReloaded = true;
         await appendLog(ctx, 'Feed de surpresas sem itens novos — recarregando uma vez.');
         await navigateTab(ctx.tabId, feedUrl, 30000).catch(() => {});
-        res = await safeTaskCmd(ctx, CMD.SURPRISE_TAP, {});
+        res = await tapOnce();
         if (res === null) break;
       }
       if (!res || !res.clicked) {
@@ -210,22 +224,57 @@ async function runSurpriseTaps(ctx) {
     }
 
     clicked += 1;
-    await settleAfterSurpriseTap(ctx, beforeUrl, feedUrl);
+    if (res.signature) attempted.add(res.signature);
+    const settle = await settleAfterSurpriseTap(ctx, beforeUrl, feedUrl);
+    if (settle.opened) {
+      openedAny = true;
+      if (res.signature && !daily.has(res.signature)) {
+        daily.add(res.signature);
+        await saveSurpriseTapped(daily).catch(() => {});
+      }
+    }
   }
+
+  // Fallback de detalhe (paridade com o ali-coins): nenhum toque abriu ficha —
+  // abre UM detalhe de produto ainda não tocado para contabilizar a rodada.
+  if (clicked > 0 && !openedAny && !(await isStopRequestedNow())) {
+    await appendLog(
+      ctx,
+      'Surpresas: nenhuma ficha abriu nos toques — abrindo 1 detalhe de produto (fallback).'
+    );
+    const beforeUrl = await getTabUrl(ctx.tabId);
+    const res = await tapOnce();
+    if (res && res.clicked) {
+      clicked += 1;
+      if (res.signature) attempted.add(res.signature);
+      const settle = await settleAfterSurpriseTap(ctx, beforeUrl, feedUrl);
+      if (settle.opened && res.signature) {
+        daily.add(res.signature);
+        await saveSurpriseTapped(daily).catch(() => {});
+      }
+    }
+  }
+
   return { ok: clicked > 0, clicked };
 }
 
 /**
  * Pós-toque (equivalentes ao waitForEvent('page')/goBack do ali-coins):
- *  - aba de item aberta → aguarda os beacons e fecha;
+ *  - aba de item aberta → trata como mini aba de run (mobile + foco), aguarda
+ *    os beacons e fecha;
  *  - a própria página navegou → aguarda, volta e garante a tela do feed;
  *  - sem navegação visível → pequena pausa.
+ * @returns {Promise<{opened: boolean}>} opened=true quando uma ficha abriu
  */
 async function settleAfterSurpriseTap(ctx, beforeUrl, feedUrl) {
-  const itemTabClosed = await consumeItemTab(ctx.windowId, { timeoutMs: 2500, graceMs: 3500 });
-  if (itemTabClosed) {
+  const item = await consumeItemTab(ctx.windowId, {
+    settings: ctx.settings,
+    timeoutMs: 2500,
+    graceMs: 1500
+  });
+  if (item && item.closed) {
     await sleepAbortable(600);
-    return;
+    return { opened: true };
   }
 
   const urlNow = await getTabUrl(ctx.tabId);
@@ -239,11 +288,12 @@ async function settleAfterSurpriseTap(ctx, beforeUrl, feedUrl) {
       await navigateTab(ctx.tabId, feedUrl, 30000).catch(() => {});
     }
     await sleepAbortable(500);
-    return;
+    return { opened: true };
   }
 
   // Sem navegação visível (overlay/SPA): pausa curta antes do próximo toque.
   await sleepAbortable(600);
+  return { opened: false };
 }
 
 // Confirmação extra antes de aceitar "sem progresso" numa rodada: o status do

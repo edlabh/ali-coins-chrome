@@ -128,3 +128,63 @@ export function patchRunState(patch) {
   runStateChain = op.catch(() => {});
   return op;
 }
+
+// ── Memória diária da tarefa "Explore itens surpresa" ────────────────────────
+// A referência (ali-coins) persiste as assinaturas dos cards tocados em arquivo
+// por DIA (e por conta): toques repetidos NÃO contam progresso, então a memória
+// precisa sobreviver entre execuções. Aqui vive no chrome.storage.local com a
+// mesma chave de dia contábil (America/Los_Angeles).
+
+const SURPRISE_TAPPED_KEY = 'surpriseTapped';
+const SURPRISE_TAPPED_LIMIT = 500;
+
+/**
+ * Data do "dia contábil" do AliExpress (America/Los_Angeles) — YYYY-MM-DD.
+ * @param {Date} [date]
+ * @returns {string}
+ */
+export function accountingDateKey(date = new Date()) {
+  try {
+    return date.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
+}
+
+/**
+ * Assinaturas de cards da surpresa tocados HOJE (memória entre execuções).
+ * @param {string} [dateKey]
+ * @returns {Promise<Set<string>>}
+ */
+export async function getSurpriseTapped(dateKey = accountingDateKey()) {
+  try {
+    const data = await chrome.storage.local.get(SURPRISE_TAPPED_KEY);
+    const stored = data[SURPRISE_TAPPED_KEY];
+    if (!stored || stored.dateKey !== dateKey || !Array.isArray(stored.cards)) {
+      return new Set();
+    }
+    return new Set(
+      stored.cards.filter((s) => typeof s === 'string').slice(0, SURPRISE_TAPPED_LIMIT)
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Persiste a memória diária de cards tocados (best-effort).
+ * @param {Set<string>|string[]} cards
+ * @param {string} [dateKey]
+ */
+export async function saveSurpriseTapped(cards, dateKey = accountingDateKey()) {
+  try {
+    const list = Array.from(cards || [])
+      .filter((s) => typeof s === 'string')
+      .slice(-SURPRISE_TAPPED_LIMIT);
+    await chrome.storage.local.set({
+      [SURPRISE_TAPPED_KEY]: { dateKey, cards: list, savedAt: Date.now() }
+    });
+  } catch {
+    // best-effort: falha de I/O nunca impede a execução
+  }
+}

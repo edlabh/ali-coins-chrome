@@ -7,6 +7,14 @@ import { statusLabel, coinsSourceLabel, fmtNumber } from '../common/format.js';
 
 const $ = (id) => document.getElementById(id);
 
+// Mostra a versão da extensão ao lado do nome (ex.: "Ali Coins v0.4.6").
+try {
+  const versionEl = $('appVersion');
+  if (versionEl) versionEl.textContent = `v${chrome.runtime.getManifest().version}`;
+} catch {
+  // getManifest indisponível: segue sem a versão
+}
+
 const PHASE_LABELS = {
   [PHASE.IDLE]: 'Inativo',
   [PHASE.STARTING]: 'Iniciando',

@@ -555,26 +555,6 @@
   // AÇÕES DAS TAREFAS (surpresa, busca, scroll)
   // ---------------------------------------------------------------------------
 
-  const TOUCHED_KEY = 'ac:touched-cards';
-
-  function loadTouched() {
-    try {
-      const raw = sessionStorage.getItem(TOUCHED_KEY);
-      const arr = raw ? JSON.parse(raw) : [];
-      return new Set(Array.isArray(arr) ? arr : []);
-    } catch {
-      return new Set();
-    }
-  }
-
-  function saveTouched(set) {
-    try {
-      sessionStorage.setItem(TOUCHED_KEY, JSON.stringify(Array.from(set).slice(-200)));
-    } catch {
-      // sessionStorage indisponível: segue sem persistir
-    }
-  }
-
   function cardSignature(card, idx) {
     const link = card.matches && card.matches('a') ? card : card.querySelector('a');
     const href = (link && (link.getAttribute('href') || link.href)) || '';
@@ -638,16 +618,21 @@
    * inicial e repetir) fica no background, que sobrevive a navegações completas
    * da aba (o content script morre numa navegação e não voltaria sozinho).
    *
-   * Itens já tocados ficam em sessionStorage e NUNCA se repetem — inclusive
-   * entre rodadas da mesma tarefa (persiste na aba).
-   * @returns {Promise<{clicked: boolean, signature?: string, cards?: number}>}
+   * A memória de itens tocados é gerenciada pelo BACKGROUND (chave por dia no
+   * chrome.storage.local — sobrevive entre execuções, como o arquivo por dia
+   * do ali-coins) e chega pronta em `exclude`: itens tocados NUNCA se repetem,
+   * pois a repetição não conta progresso.
+   * @param {{exclude?: string[]}} [payload]
+   * @returns {Promise<{clicked: boolean, signature?: string, cards?: number, debug?: object}>}
    */
-  async function surpriseTapNext() {
+  async function surpriseTapNext({ exclude } = {}) {
     // Se a gaveta de tarefas permaneceu aberta sobre a central de moedas,
     // fecha-a antes de procurar/clicar nos cards do feed.
     await closeDrawerIfOpen();
     await waitUntil(() => queryVisible(S.tasks.productCard), { timeout: 12000, interval: 500 });
-    const touched = loadTouched();
+    const touched = new Set(
+      Array.isArray(exclude) ? exclude.filter((s) => typeof s === 'string') : []
+    );
 
     let target = null;
     let sig = '';
@@ -690,11 +675,11 @@
     }
 
     const link = target.matches && target.matches('a') ? target : target.querySelector('a');
-    // O site abre a ficha (nova aba ou mesma aba): o background detecta,
-    // espera os beacons de tracking e retorna à tela inicial.
+    // O site abre a ficha (nova aba ou mesma aba): o background detecta, espera
+    // os beacons de tracking e retorna à tela inicial. A assinatura volta na
+    // resposta — o background decide se a marca como "tocada" (só quando a
+    // ficha realmente abriu; sem abertura o card fica elegível de novo).
     await smartClick(link || target);
-    touched.add(sig);
-    saveTouched(touched);
     return { clicked: true, signature: sig, cards: feedCardCandidates().length, debug };
   }
 

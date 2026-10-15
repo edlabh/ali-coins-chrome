@@ -26,6 +26,11 @@ import {
 } from '../src/common/state-utils.js';
 import { sendCmd, isNoContentScriptError } from '../src/background/context.js';
 import { getRunState, patchRunState, saveSettings as saveSettingsStorage } from '../src/background/storage.js';
+import {
+  accountingDateKey,
+  getSurpriseTapped,
+  saveSurpriseTapped
+} from '../src/background/storage.js';
 import { ensureCoinPage, isCoinUrl } from '../src/background/tabs.js';
 import { ensureAuthenticated } from '../src/background/auth.js';
 import { applyWindowPolicy } from '../src/background/finalize.js';
@@ -551,6 +556,42 @@ test('storage: saveSettings descarta campos legados (credenciais/cooldown) e man
     assert.equal(localData.settings.passwordEnc, undefined);
     assert.equal(localData.settings.riskCooldownHours, undefined);
     assert.equal(localData.settings.settingsVersion, SETTINGS_VERSION);
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+  }
+});
+
+test('storage: memória diária da surpresa (por dia contábil LA, sem vazar entre dias)', async () => {
+  const originalChrome = globalThis.chrome;
+  let localData = {};
+  globalThis.chrome = {
+    storage: {
+      local: {
+        get: async (key) => ({ [key]: localData[key] }),
+        set: async (obj) => {
+          localData = { ...localData, ...obj };
+        }
+      }
+    }
+  };
+  try {
+    // Dia contábil = America/Los_Angeles (UTC-8 no inverno).
+    assert.equal(accountingDateKey(new Date('2026-01-05T10:00:00Z')), '2026-01-05');
+    assert.equal(
+      accountingDateKey(new Date('2026-01-06T07:00:00Z')),
+      '2026-01-05',
+      '23:00 em Los Angeles ainda é o dia 5'
+    );
+
+    await saveSurpriseTapped(['sig-a', 'sig-b'], '2026-01-05');
+    const sameDay = await getSurpriseTapped('2026-01-05');
+    assert.deepEqual([...sameDay].sort(), ['sig-a', 'sig-b']);
+    assert.equal(
+      (await getSurpriseTapped('2026-01-06')).size,
+      0,
+      'a memória de outro dia não vaza'
+    );
   } finally {
     if (originalChrome === undefined) delete globalThis.chrome;
     else globalThis.chrome = originalChrome;

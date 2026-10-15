@@ -41,7 +41,7 @@
         case 'EXTRACT_TASKS':
           return AC.actions.extractTasks();
         case 'SURPRISE_TAP':
-          return await AC.actions.surpriseTapNext();
+          return await AC.actions.surpriseTapNext(payload);
         case 'CLICK_TASK':
           return AC.actions.clickTask(payload);
         case 'RUN_ACTION':

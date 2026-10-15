@@ -12,6 +12,10 @@ import { COIN_URL, COIN_URL_TASKS, pickDevice } from '../common/constants.js';
 
 const DNR_UA_RULE_ID = 9001;
 const DNR_HINTS_RULE_ID = 9002;
+// Regra dedicada à ABA DO ITEM (ficha aberta pelas tarefas): a referência
+// (Playwright) tem o contexto INTEIRO emulando um Pixel 7 — a ficha incluída.
+// Sem isso a ficha abre com UA desktop e os beacons de missão não disparam.
+const DNR_ITEM_TAB_RULE_ID = 9003;
 const LEDGER_TAB_KEY = 'ledgerTabRef';
 
 // IMPORTANTE: sem `resourceTypes` explícito o Chrome NÃO casa requisições de
@@ -226,6 +230,46 @@ export async function applyDeviceRules(tabId, settings, extraTabIds = []) {
 export async function clearDeviceRules() {
   await chrome.declarativeNetRequest
     .updateSessionRules({ removeRuleIds: [DNR_UA_RULE_ID, DNR_HINTS_RULE_ID] })
+    .catch(() => {});
+}
+
+/**
+ * Aplica as regras mobile (UA + Client Hints) a UMA aba de item/ficha aberta
+ * por uma tarefa — paridade com o contexto mobile único da referência, onde
+ * toda página (ficha incluída) herda o aparelho emulado.
+ * @param {number} itemTabId
+ * @param {object} settings
+ */
+export async function applyItemTabDeviceRules(itemTabId, settings) {
+  if (typeof itemTabId !== 'number') return;
+  const device = pickDevice(settings);
+  await chrome.declarativeNetRequest
+    .updateSessionRules({ removeRuleIds: [DNR_ITEM_TAB_RULE_ID] })
+    .catch(() => {});
+  const rule = {
+    id: DNR_ITEM_TAB_RULE_ID,
+    priority: 2,
+    action: {
+      type: 'modifyHeaders',
+      requestHeaders: [
+        { header: 'user-agent', operation: 'set', value: device.userAgent },
+        { header: 'sec-ch-ua-mobile', operation: 'set', value: '?1' },
+        { header: 'sec-ch-ua-platform', operation: 'set', value: '"Android"' }
+      ]
+    },
+    condition: dnrCondition([itemTabId])
+  };
+  await chrome.declarativeNetRequest.updateSessionRules({ addRules: [rule] }).catch(() => {
+    // Sem suporte a modificar client hints: o UA sozinho já garante a variante.
+  });
+}
+
+/**
+ * Remove a regra dedicada da aba de item (chamada quando a ficha é fechada).
+ */
+export async function clearItemTabDeviceRules() {
+  await chrome.declarativeNetRequest
+    .updateSessionRules({ removeRuleIds: [DNR_ITEM_TAB_RULE_ID] })
     .catch(() => {});
 }
 
