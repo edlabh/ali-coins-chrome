@@ -304,6 +304,38 @@ test('AÇÕES: listFeedCards encontra os cards reais do feed (exclui subpartes e
   assert.deepEqual([...sigs], ['card-a', 'card-b', 'card-c']);
 });
 
+test('AÇÕES: hit-test — alvo coberto usa clique sintético; alvo livre usa clique confiável', async () => {
+  const env = createContentEnv(`
+    <div id="overlay"></div>
+    <div class="e2e_normal_task">
+      <div class="e2e_normal_task_content_title">Ofertas</div>
+      <div class="e2e_normal_task_right">
+        <button class="e2e_normal_task_right_btn" id="go">GO</button>
+      </div>
+    </div>
+  `);
+  const trusted = [];
+  env.setSendMessageHandler(async (msg) => {
+    if (msg && msg.type === 'TRUSTED_CLICK') trusted.push(msg.payload);
+    return { ok: true };
+  });
+  const { window } = env;
+  const doc = window.document;
+
+  // 1) O ponto do botão está coberto pelo overlay → NÃO manda clique por
+  //    coordenadas (que "vazaria" para o overlay); usa o clique sintético.
+  doc.elementFromPoint = () => doc.getElementById('overlay');
+  const covered = await env.AC.actions.clickTask({ index: 0, title: 'Ofertas' });
+  assert.equal(covered.clicked, true);
+  assert.equal(trusted.length, 0, 'coberto: não envia clique confiável');
+
+  // 2) Alvo livre no ponto → dispara o clique confiável por coordenadas.
+  doc.elementFromPoint = () => doc.getElementById('go');
+  const free = await env.AC.actions.clickTask({ index: 0, title: 'Ofertas' });
+  assert.equal(free.clicked, true);
+  assert.equal(trusted.length, 1, 'livre: usa o clique confiável');
+});
+
 test('AÇÕES: surpriseTapNext toca 1 item por vez e respeita a lista de exclusão', async () => {
   const env = createContentEnv(`
     <div class="aecoin-feedlist-card-sSnlv" data-item-id="card-a"></div>

@@ -32,6 +32,7 @@ import {
   saveSurpriseTapped
 } from '../src/background/storage.js';
 import { ensureCoinPage, isCoinUrl } from '../src/background/tabs.js';
+import { clearDeviceRules, registerAuxTab, unregisterAuxTab } from '../src/background/tabs.js';
 import { ensureAuthenticated } from '../src/background/auth.js';
 import { applyWindowPolicy } from '../src/background/finalize.js';
 import {
@@ -673,6 +674,54 @@ test('tabs: ensureCoinPage volta à central a partir de subpáginas coin-index (
     assert.equal(updates.length, 1, 'deve navegar de volta à central');
     assert.equal(updates[0].tabId, 9);
     assert.match(updates[0].props.url, /\/p\/coin-index\/index\.html\?/);
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+  }
+});
+
+test('tabs: registerAuxTab acumula as abas auxiliares nas regras mobile; unregister/clear limpam', async () => {
+  const originalChrome = globalThis.chrome;
+  const calls = [];
+  globalThis.chrome = {
+    tabs: {
+      get: async (id) => ({ id })
+    },
+    declarativeNetRequest: {
+      updateSessionRules: async (arg) => {
+        calls.push(arg);
+      }
+    }
+  };
+  try {
+    await clearDeviceRules();
+    calls.length = 0;
+
+    await registerAuxTab(11, {});
+    await registerAuxTab(22, {});
+    const add1 = calls.filter((c) => c.addRules).pop();
+    assert.deepEqual(
+      add1.addRules[0].condition.tabIds,
+      [11, 22],
+      'acumula as abas auxiliares (contexto mobile desde o primeiro byte)'
+    );
+    assert.equal(add1.addRules[0].action.type, 'modifyHeaders');
+    assert.equal(
+      add1.addRules[0].action.requestHeaders.some((h) => h.header === 'user-agent'),
+      true,
+      'reescreve o user-agent'
+    );
+
+    await unregisterAuxTab(11);
+    const add2 = calls.filter((c) => c.addRules).pop();
+    assert.deepEqual(add2.addRules[0].condition.tabIds, [22], 'remove a aba fechada');
+
+    await clearDeviceRules();
+    const remove = calls.filter((c) => c.removeRuleIds).pop();
+    assert.ok(
+      remove.removeRuleIds.includes(9003),
+      'clearDeviceRules remove a regra das abas auxiliares'
+    );
   } finally {
     if (originalChrome === undefined) delete globalThis.chrome;
     else globalThis.chrome = originalChrome;

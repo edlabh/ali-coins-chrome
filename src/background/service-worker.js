@@ -5,7 +5,7 @@
 import { MSG, PHASE, pickDevice } from '../common/constants.js';
 import { startRun, requestStop } from './runner.js';
 import { installScheduler, scheduleDaily } from './scheduler.js';
-import { focusWindow, isAliexpressUrl, prepareRunTab } from './tabs.js';
+import { focusWindow, isAliexpressUrl, prepareRunTab, registerAuxTab } from './tabs.js';
 import { clickTrusted, forgetCdp } from './cdp.js';
 import { getRunState, getRuntime, getSettings, pushReport } from './storage.js';
 
@@ -73,6 +73,18 @@ chrome.tabs.onCreated.addListener(async (tab) => {
     const spawnedByRunTab = Boolean(runState.tabId && tab.openerTabId === runState.tabId);
     const owned = spawnedByRunTab || isRunOwnedTab(tab.id, tab, runState);
     if (!owned) return;
+
+    // P1: contexto mobile DESDE O PRIMEIRO BYTE — registra a aba auxiliar e
+    // aplica as regras DNR (UA/Client Hints) na CRIAÇÃO, antes de o primeiro
+    // load terminar. É o equivalente da extensão ao contexto único Pixel 7 da
+    // referência (onde toda página nasce mobile); sem isto a 1ª carga saía
+    // desktop e um reload posterior era uma 2ª visita sem referrer/gesto.
+    try {
+      const settings = await getSettings();
+      await registerAuxTab(tab.id, settings);
+    } catch {
+      // best-effort: a aba segue sem as regras se o storage falhar
+    }
 
     // Fluxo restaurado (v0.4.5, igual à v0.3.3 + projeto de origem): a página da
     // tarefa DEVE abrir na própria aba/nova aba do site — é assim que o

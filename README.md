@@ -48,8 +48,10 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
      a execução acontece na próxima abertura;
    - **Retentativa automática** (padrão): uma falha agenda **1 nova tentativa** em ~45 min;
    - **Tarefa "Explore itens surpresa"** (desligada por padrão): desmarque a opção para
-     executá-la — a ficha do item abre em contexto mobile com foco emulado, há fallback
-     de detalhe e memória diária de cards (itens repetidos não contam progresso);
+     executá-la — qualquer página que o site abrir (feed, ficha do item) recebe o
+     **contexto mobile já na criação da aba** (sem reload), os cliques têm **hit-test**
+     contra overlays, há fallback de detalhe e memória diária de cards (itens repetidos
+     não contam progresso); o extrato mostra o **diagnóstico de beacons/visibilidade** da ficha;
    - **Modo silencioso** (**padrão**): executa em uma **aba de fundo, sem abrir
      janela** — a aba só vem para frente se um captcha/2FA precisar de você (ou para
      abrir o login da versão desktop quando a sessão expirar);

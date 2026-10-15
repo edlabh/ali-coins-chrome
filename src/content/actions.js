@@ -18,8 +18,11 @@
    * sintético fica como fallback. O clique vai por COORDENADAS (centro do
    * elemento), como um tap real: atinge o que está visualmente no ponto e
    * produz eventos isTrusted=true (SPAs podem ignorar eventos sintéticos).
+   * P3: antes do clique confiável há um HIT-TEST — se um overlay (gaveta,
+   * modal, banner) estiver no ponto, o clique por coordenadas "vazaria" para
+   * ele; nesse caso usamos o clique sintético direto no elemento.
    * @param {Element} el
-   * @returns {Promise<boolean>} true quando o clique confiável foi aplicado
+   * @returns {Promise<boolean>} true quando um clique foi de fato disparado
    */
   async function smartClick(el) {
     if (!el) return false;
@@ -33,15 +36,40 @@
     if (rect.width > 0 && rect.height > 0) {
       const x = Math.round(rect.left + rect.width / 2);
       const y = Math.round(rect.top + rect.height / 2);
-      if (x >= 0 && y >= 0 && x <= window.innerWidth && y <= window.innerHeight) {
+      if (
+        x >= 0 &&
+        y >= 0 &&
+        x <= window.innerWidth &&
+        y <= window.innerHeight &&
+        hitTestOk(el, x, y)
+      ) {
         const res = await chrome.runtime
           .sendMessage({ type: 'TRUSTED_CLICK', payload: { x, y } })
           .catch(() => null);
         if (res && res.ok) return true;
       }
     }
-    clickHuman(el);
-    return false;
+    return clickHuman(el);
+  }
+
+  /**
+   * Verifica se o ponto (x, y) pertence ao alvo (ou a um descendente/ancestral
+   * dele) antes de disparar o clique confiável por coordenadas. Sem hit-test
+   * disponível no ambiente (ex.: jsdom), libera o clique confiável.
+   * @param {Element} el
+   * @param {number} x
+   * @param {number} y
+   * @returns {boolean}
+   */
+  function hitTestOk(el, x, y) {
+    try {
+      if (typeof document.elementFromPoint !== 'function') return true;
+      const top = document.elementFromPoint(x, y);
+      if (!top) return true;
+      return top === el || el.contains(top) || top.contains(el);
+    } catch {
+      return true;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -547,8 +575,8 @@
     const btn = row.querySelector(S.tasks.taskBtn) || row.querySelector(S.tasks.taskRight);
     if (!btn) return { clicked: false };
     const btnText = (btn.innerText || '').trim();
-    await smartClick(btn);
-    return { clicked: true, btnText };
+    const ok = await smartClick(btn);
+    return { clicked: Boolean(ok), btnText };
   }
 
   // ---------------------------------------------------------------------------
@@ -677,10 +705,10 @@
     const link = target.matches && target.matches('a') ? target : target.querySelector('a');
     // O site abre a ficha (nova aba ou mesma aba): o background detecta, espera
     // os beacons de tracking e retorna à tela inicial. A assinatura volta na
-    // resposta — o background decide se a marca como "tocada" (só quando a
-    // ficha realmente abriu; sem abertura o card fica elegível de novo).
-    await smartClick(link || target);
-    return { clicked: true, signature: sig, cards: feedCardCandidates().length, debug };
+    // resposta — o background registra o card na memória do dia em clique
+    // bem-sucedido (paridade com a origem: repetição não conta progresso).
+    const ok = await smartClick(link || target);
+    return { clicked: Boolean(ok), signature: sig, cards: feedCardCandidates().length, debug };
   }
 
   async function executeSearchTask(query, seconds) {

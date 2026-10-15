@@ -95,16 +95,29 @@ async function safeTaskCmd(ctx, type, payload = {}) {
 async function adoptTaskTab(ctx) {
   const runState = await getRunState();
   const known = new Set(Array.isArray(runState?.knownTabIds) ? runState.knownTabIds : []);
-  const tabs = await chrome.tabs.query({ windowId: ctx.windowId }).catch(() => []);
-  const candidate = tabs.find(
-    (t) =>
-      t.id &&
-      t.id !== ctx.tabId &&
-      t.id !== runState?.ledgerTabId &&
-      !known.has(t.id) &&
-      isAliexpressUrl(t.url || '') &&
-      !/coin-pc-index/.test(t.url || '')
-  );
+  // P4: com o fluxo de popup restaurado, a aba da tarefa pode ainda estar em
+  // navegação pendente quando a consulta roda (URL vazia/about:blank) — tenta
+  // algumas vezes, considera `pendingUrl` e aceita aba em branco filha da aba
+  // do run (antes, uma única consulta perdia a aba; a ação rodava na central e
+  // a rodada era queimada sem nenhum toque).
+  let candidate = null;
+  for (let attempt = 0; attempt < 6 && !candidate; attempt += 1) {
+    const tabs = await chrome.tabs.query({ windowId: ctx.windowId }).catch(() => []);
+    candidate =
+      tabs.find(
+        (t) =>
+          t.id &&
+          t.id !== ctx.tabId &&
+          t.id !== runState?.ledgerTabId &&
+          !known.has(t.id) &&
+          !/coin-pc-index/.test(t.url || '') &&
+          !/coin-pc-index/.test(t.pendingUrl || '') &&
+          (isAliexpressUrl(t.url || '') ||
+            isAliexpressUrl(t.pendingUrl || '') ||
+            (t.openerTabId === ctx.tabId && !t.url && !t.pendingUrl))
+      ) || null;
+    if (!candidate) await sleepAbortable(250);
+  }
   if (!candidate) return false;
 
   // A aba pode ter sido fechada pelo site/navegador a qualquer momento:
@@ -182,9 +195,11 @@ async function restoreTaskTab(ctx) {
 async function runSurpriseTaps(ctx) {
   const feedUrl = await getTabUrl(ctx.tabId);
   await appendLog(ctx, `Surpresas: rodada em ${truncate(feedUrl || '', 80)}.`);
-  // Memória do dia (persistente entre execuções) + tentativas desta rodada:
-  // um card que não abriu ficha NÃO é marcado no dia (fica elegível de novo na
-  // próxima rodada/execução), mas não é re-selecionado na MESMA rodada.
+  // Memória do dia (persistente entre execuções, paridade com o arquivo por dia
+  // da referência) + tentativas desta rodada. P3: o card entra na memória no
+  // CLIQUE bem-sucedido (como a origem) — repetir o mesmo toque não conta
+  // progresso; o fallback de detalhe abaixo garante a visita quando nenhuma
+  // ficha abrir.
   const daily = await getSurpriseTapped().catch(() => new Set());
   const attempted = new Set();
   let clicked = 0;
@@ -224,15 +239,15 @@ async function runSurpriseTaps(ctx) {
     }
 
     clicked += 1;
-    if (res.signature) attempted.add(res.signature);
-    const settle = await settleAfterSurpriseTap(ctx, beforeUrl, feedUrl);
-    if (settle.opened) {
-      openedAny = true;
-      if (res.signature && !daily.has(res.signature)) {
+    if (res.signature) {
+      attempted.add(res.signature);
+      if (!daily.has(res.signature)) {
         daily.add(res.signature);
         await saveSurpriseTapped(daily).catch(() => {});
       }
     }
+    const settle = await settleAfterSurpriseTap(ctx, beforeUrl, feedUrl);
+    if (settle.opened) openedAny = true;
   }
 
   // Fallback de detalhe (paridade com o ali-coins): nenhum toque abriu ficha —
@@ -246,12 +261,15 @@ async function runSurpriseTaps(ctx) {
     const res = await tapOnce();
     if (res && res.clicked) {
       clicked += 1;
-      if (res.signature) attempted.add(res.signature);
-      const settle = await settleAfterSurpriseTap(ctx, beforeUrl, feedUrl);
-      if (settle.opened && res.signature) {
-        daily.add(res.signature);
-        await saveSurpriseTapped(daily).catch(() => {});
+      if (res.signature) {
+        attempted.add(res.signature);
+        if (!daily.has(res.signature)) {
+          daily.add(res.signature);
+          await saveSurpriseTapped(daily).catch(() => {});
+        }
       }
+      // Diagnósticos da ficha já foram logados pelo próprio settle.
+      await settleAfterSurpriseTap(ctx, beforeUrl, feedUrl);
     }
   }
 
@@ -273,6 +291,14 @@ async function settleAfterSurpriseTap(ctx, beforeUrl, feedUrl) {
     graceMs: 1500
   });
   if (item && item.closed) {
+    // Diagnóstico de crédito (P2): quantos beacons de tracking a ficha disparou
+    // e qual a visibilidade real da página — confirma/derruba a hipótese de
+    // throttling da aba oculta (a referência desliga o throttling no launch).
+    const vis = item.visibility ? `, visibilidade "${item.visibility}"` : '';
+    await appendLog(
+      ctx,
+      `Ficha do item: ${Number.isFinite(item.tracking) ? item.tracking : 0} beacon(s) de tracking${vis} (diagnóstico).`
+    );
     await sleepAbortable(600);
     return { opened: true };
   }
@@ -565,11 +591,12 @@ export async function runTasksPhase(ctx) {
       continue;
     }
     if (clickedTask.clicked === false) {
-      // A lista pode ter re-renderizado e o botão não foi localizado: a
-      // tentativa já está contada — evita "rodada fantasma" sem clique.
+      // A lista pode ter re-renderizado e o botão não foi localizado (ou o
+      // clique foi impedido): a tentativa já está contada — evita "rodada
+      // fantasma" sem clique.
       await appendLog(
         ctx,
-        `O botão da tarefa "${truncate(next.title, 60)}" não foi encontrado na gaveta — tentativa contada.`
+        `O clique da tarefa "${truncate(next.title, 60)}" não foi disparado (botão ausente ou alvo impedido) — tentativa contada.`
       );
       await sleepAbortable(800);
       continue;

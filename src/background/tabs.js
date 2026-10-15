@@ -12,11 +12,16 @@ import { COIN_URL, COIN_URL_TASKS, pickDevice } from '../common/constants.js';
 
 const DNR_UA_RULE_ID = 9001;
 const DNR_HINTS_RULE_ID = 9002;
-// Regra dedicada à ABA DO ITEM (ficha aberta pelas tarefas): a referência
-// (Playwright) tem o contexto INTEIRO emulando um Pixel 7 — a ficha incluída.
-// Sem isso a ficha abre com UA desktop e os beacons de missão não disparam.
-const DNR_ITEM_TAB_RULE_ID = 9003;
+// Regra compartilhada das ABAS AUXILIARES do run (fichas de item, páginas que o
+// site abre): a referência (Playwright) tem o contexto INTEIRO emulando um
+// Pixel 7 — toda página nasce mobile, desde o primeiro byte. Sem isso a 1ª
+// carga sai com UA desktop (e um reload posterior é uma 2ª visita sem referrer).
+const DNR_AUX_TAB_RULE_ID = 9003;
 const LEDGER_TAB_KEY = 'ledgerTabRef';
+
+// Abas auxiliares registradas (mantidas em memória para reconstruir a regra).
+const auxTabIds = new Set();
+let lastAuxDevice = null;
 
 // IMPORTANTE: sem `resourceTypes` explícito o Chrome NÃO casa requisições de
 // navegação (main_frame) — era a causa raiz do primeiro load em layout desktop.
@@ -225,29 +230,28 @@ export async function applyDeviceRules(tabId, settings, extraTabIds = []) {
 }
 
 /**
- * Remove as regras de rede da aba de execução.
+ * Remove as regras de rede da aba de execução (inclui a regra das abas
+ * auxiliares e limpa o conjunto em memória).
  */
 export async function clearDeviceRules() {
+  auxTabIds.clear();
+  lastAuxDevice = null;
   await chrome.declarativeNetRequest
-    .updateSessionRules({ removeRuleIds: [DNR_UA_RULE_ID, DNR_HINTS_RULE_ID] })
+    .updateSessionRules({ removeRuleIds: [DNR_UA_RULE_ID, DNR_HINTS_RULE_ID, DNR_AUX_TAB_RULE_ID] })
     .catch(() => {});
 }
 
 /**
- * Aplica as regras mobile (UA + Client Hints) a UMA aba de item/ficha aberta
- * por uma tarefa — paridade com o contexto mobile único da referência, onde
- * toda página (ficha incluída) herda o aparelho emulado.
- * @param {number} itemTabId
- * @param {object} settings
+ * Reconstroi a regra DNR das abas auxiliares com o conjunto atual.
  */
-export async function applyItemTabDeviceRules(itemTabId, settings) {
-  if (typeof itemTabId !== 'number') return;
-  const device = pickDevice(settings);
+async function rebuildAuxTabRule() {
   await chrome.declarativeNetRequest
-    .updateSessionRules({ removeRuleIds: [DNR_ITEM_TAB_RULE_ID] })
+    .updateSessionRules({ removeRuleIds: [DNR_AUX_TAB_RULE_ID] })
     .catch(() => {});
+  if (auxTabIds.size === 0) return;
+  const device = lastAuxDevice || pickDevice({});
   const rule = {
-    id: DNR_ITEM_TAB_RULE_ID,
+    id: DNR_AUX_TAB_RULE_ID,
     priority: 2,
     action: {
       type: 'modifyHeaders',
@@ -257,7 +261,7 @@ export async function applyItemTabDeviceRules(itemTabId, settings) {
         { header: 'sec-ch-ua-platform', operation: 'set', value: '"Android"' }
       ]
     },
-    condition: dnrCondition([itemTabId])
+    condition: dnrCondition([...auxTabIds])
   };
   await chrome.declarativeNetRequest.updateSessionRules({ addRules: [rule] }).catch(() => {
     // Sem suporte a modificar client hints: o UA sozinho já garante a variante.
@@ -265,12 +269,33 @@ export async function applyItemTabDeviceRules(itemTabId, settings) {
 }
 
 /**
- * Remove a regra dedicada da aba de item (chamada quando a ficha é fechada).
+ * Registra uma aba AUXILIAR do run (ficha de item, página aberta pelo site) e
+ * aplica/atualiza as regras mobile nela — chamada na CRIAÇÃO da aba, antes do
+ * primeiro load terminar, como o contexto único mobile da referência (P1).
+ * Idempotente; faz prune de abas já fechadas.
+ * @param {number} tabId
+ * @param {object} settings
  */
-export async function clearItemTabDeviceRules() {
-  await chrome.declarativeNetRequest
-    .updateSessionRules({ removeRuleIds: [DNR_ITEM_TAB_RULE_ID] })
-    .catch(() => {});
+export async function registerAuxTab(tabId, settings) {
+  if (typeof tabId !== 'number') return;
+  auxTabIds.add(tabId);
+  if (settings) lastAuxDevice = pickDevice(settings);
+  // prune de ids mortos (best-effort) para a regra não crescer para sempre.
+  for (const id of [...auxTabIds]) {
+    if (id === tabId) continue;
+    const t = await chrome.tabs.get(id).catch(() => null);
+    if (!t) auxTabIds.delete(id);
+  }
+  await rebuildAuxTabRule();
+}
+
+/**
+ * Remove uma aba auxiliar do conjunto (chamada quando a aba é fechada).
+ * @param {number} tabId
+ */
+export async function unregisterAuxTab(tabId) {
+  if (!auxTabIds.delete(tabId)) return;
+  await rebuildAuxTabRule();
 }
 
 function isBlankUrl(url) {
