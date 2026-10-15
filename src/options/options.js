@@ -126,7 +126,7 @@ async function load() {
   $('startDelayMaxMin').value = s.startDelayMaxMin ?? 15;
 
   $('skipAppOnlyTasks').checked = s.skipAppOnlyTasks !== false;
-  $('skipSurpriseTask').checked = s.skipSurpriseTask !== false;
+  $('skipSurpriseTask').checked = s.skipSurpriseTask === true;
   $('maxTaskActions').value = s.maxTaskActions ?? DEFAULT_SETTINGS.maxTaskActions;
   $('maxAttemptsPerTask').value = s.maxAttemptsPerTask ?? DEFAULT_SETTINGS.maxAttemptsPerTask;
   $('pauseMinS').value = Math.round((s.pauseBetweenTasksMinMs ?? 5000) / 1000);

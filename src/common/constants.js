@@ -111,9 +111,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
 
   // Comportamento de tarefas
   skipAppOnlyTasks: true,
-  // "Explore itens surpresa" não funciona no site mobile atual: ignorada por
-  // padrão (desmarque nas Opções para voltar a tentar).
-  skipSurpriseTask: true,
+  // "Explore itens surpresa" é EXECUTADA por padrão (marque a opção nas Opções
+  // para ignorá-la).
+  skipSurpriseTask: false,
   // Limite configurável de ações por execução (resgates + tarefas executadas).
   maxTaskActions: 60,
   maxAttemptsPerTask: 3,

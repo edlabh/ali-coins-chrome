@@ -120,7 +120,7 @@ export function selectLateProgressCandidates(tasks, options = {}) {
     disabled = null,
     maxRoundAttempts = 3,
     skipAppOnlyTasks = true,
-    skipSurpriseTask = true
+    skipSurpriseTask = false
   } = options;
   const out = [];
   for (const t of Array.isArray(tasks) ? tasks : []) {
@@ -156,7 +156,7 @@ export function pickNextTask(tasks, attempts = {}, options = {}) {
     ? options.maxAttemptsPerTask
     : 3;
   const skipAppOnly = options.skipAppOnlyTasks !== false;
-  const skipSurprise = options.skipSurpriseTask !== false;
+  const skipSurprise = options.skipSurpriseTask === true;
   const claimed = options.claimed instanceof Set ? options.claimed : new Set();
   const roundAttempts = options.roundAttempts || {};
   const failed = options.failed || {};
@@ -244,8 +244,9 @@ export function summarizeTasks(tasks) {
  * v5: garante silentMode=true e keepWindowOpen=false em instalações existentes.
  * v6: remove login por credenciais (campos user/passwordEnc/passwordPlain/cryptoOk),
  *     o tempo máx. de captcha e o cooldown anti-bot (comportamentos fixos agora).
+ * v7: "Explore itens surpresa" passa a ser executada por padrão.
  */
-export const SETTINGS_VERSION = 6;
+export const SETTINGS_VERSION = 7;
 
 /**
  * Migra configurações salvas por versões anteriores.
@@ -308,6 +309,14 @@ export function migrateSettings(stored) {
       delete settings[key];
       changed = true;
     }
+  }
+
+  // v7: a tarefa "Explore itens surpresa" passa a ser EXECUTADA por padrão
+  // (pedido do usuário) — instalações existentes são alinhadas ao novo padrão;
+  // quem quiser pular, marca a opção nas Opções.
+  if (fromVersion < 7) {
+    settings.skipSurpriseTask = false;
+    changed = true;
   }
 
   if (changed || fromVersion !== SETTINGS_VERSION) {

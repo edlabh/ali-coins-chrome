@@ -171,16 +171,16 @@ test('pickNextTask pula tarefas exclusivas do app quando configurado', () => {
   assert.equal(picked.title, 'Merge Boss');
 });
 
-test('pickNextTask pula "Explore itens surpresa" por padrão', () => {
+test('pickNextTask executa "Explore itens surpresa" por padrão; pula quando configurado', () => {
   const t = task({ title: 'Explore itens surpresa', kind: 'surprise' });
 
   const picked = pickNextTask([t], {}, {});
-  assert.equal(picked.action, 'skip_surprise');
-  assert.equal(picked.title, 'Explore itens surpresa');
+  assert.equal(picked.action, 'run', 'por padrão a tarefa é executada');
+  assert.equal(picked.kind, 'surprise');
 
-  const reenabled = pickNextTask([t], {}, { skipSurpriseTask: false });
-  assert.equal(reenabled.action, 'run');
-  assert.equal(reenabled.kind, 'surprise');
+  const skipped = pickNextTask([t], {}, { skipSurpriseTask: true });
+  assert.equal(skipped.action, 'skip_surprise');
+  assert.equal(skipped.title, 'Explore itens surpresa');
 });
 
 test('pickNextTask não repete resgates já clicados', () => {
@@ -313,6 +313,7 @@ test('migrateSettings desliga keepWindowOpen legado e carimba a versão', () => 
   assert.equal(legacy.settings.cryptoOk, undefined);
   assert.equal(legacy.settings.captchaTimeoutMin, undefined, 'v6: sem tempo máx. de captcha');
   assert.equal(legacy.settings.riskCooldownHours, undefined, 'v6: sem cooldown anti-bot');
+  assert.equal(legacy.settings.skipSurpriseTask, false, 'v7: surpresa executada por padrão');
 
   // Config já na versão atual: preferências do usuário são preservadas.
   const current = migrateSettings({ keepWindowOpen: true, settingsVersion: SETTINGS_VERSION });
@@ -333,6 +334,7 @@ test('migrateSettings desliga keepWindowOpen legado e carimba a versão', () => 
   assert.equal(fresh.settings.keepWindowOpen, false);
   assert.equal(fresh.settings.silentMode, true);
   assert.equal(fresh.settings.maxTaskActions, 60);
+  assert.equal(fresh.settings.skipSurpriseTask, false, 'v7: surpresa executada por padrão');
 });
 
 test('shouldScheduleRetry: 1 retentativa apenas para erros, sem loop', () => {

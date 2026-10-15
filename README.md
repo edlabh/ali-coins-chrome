@@ -47,8 +47,8 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
    - **Catch-up de agenda** (padrão): se o Chrome estava fechado no horário agendado,
      a execução acontece na próxima abertura;
    - **Retentativa automática** (padrão): uma falha agenda **1 nova tentativa** em ~45 min;
-   - **Tarefa "Explore itens surpresa"** (desligada por padrão): desmarque a opção para
-     executá-la — qualquer página que o site abrir (feed, ficha do item) recebe o
+   - **Tarefa "Explore itens surpresa"** (executada por padrão): marque a opção para
+     ignorá-la — qualquer página que o site abrir (feed, ficha do item) recebe o
      **contexto mobile já na criação da aba** (sem reload), os cliques têm **hit-test**
      contra overlays, há fallback de detalhe e memória diária de cards (itens repetidos
      não contam progresso); o extrato mostra o **diagnóstico de beacons/visibilidade** da ficha;
@@ -96,7 +96,7 @@ janela Pixel 8 → m.aliexpress.com/coin-index
 | Emulação mobile | Pixel 7 (Playwright `devices`) | Pixel 8 via janela 412×915 + UA/Client Hints (DNR) |
 | Login | usuário/senha + slide captcha | sessão do perfil; se expirar, **erro acionável + login da versão desktop** (sem credenciais) |
 | Check-in | `#signButton` + confirmação + streak | idêntico (mesmos seletores/fallbacks) |
-| Tarefas | surpresa/busca/scroll/resgate, gaveta `.e2e_task` | idêntico (Explore itens surpresa desligada por padrão — fluxo completo quando religada) |
+| Tarefas | surpresa/busca/scroll/resgate, gaveta `.e2e_task` | idêntico (Explore itens surpresa executada por padrão — configurável) |
 | Captcha | tenta deslizar automaticamente | pausa e aguarda o usuário resolver, sem tempo máximo (por design) |
 | Contabilidade | extrato desktop (mycoin): saldo, Bônus diário, Missões de moedas | idêntica — aba desktop dedicada, mesmo parser e prioridades |
 | Risco RGV587 | cooldown 48h + fail-fast | fail-fast: encerra o run por precaução, sem pausa fixa |

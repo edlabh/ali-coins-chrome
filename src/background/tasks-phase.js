@@ -452,7 +452,7 @@ export async function runTasksPhase(ctx) {
     // gaveta por tarefa): exclusivas do app (padrão) e "Explore itens surpresa"
     // (não funciona no site mobile — ignorada por padrão).
     const shouldSkipKind = (kind) => {
-      if (kind === 'surprise') return settings.skipSurpriseTask !== false;
+      if (kind === 'surprise') return settings.skipSurpriseTask === true;
       return settings.skipAppOnlyTasks && (kind === 'app-only' || kind === 'prize-land');
     };
     for (const t of tasks) {
@@ -468,7 +468,7 @@ export async function runTasksPhase(ctx) {
           await appendLog(
             ctx,
             kind === 'surprise'
-              ? `Tarefa ignorada (opção — não funciona no site mobile): ${truncate(t.title, 60)}.`
+              ? `Tarefa ignorada (opção das Opções): ${truncate(t.title, 60)}.`
               : `Tarefa ignorada (exclusiva do app): ${truncate(t.title, 60)}.`
           );
         }
@@ -502,7 +502,7 @@ export async function runTasksPhase(ctx) {
       disabled: disabledTitles,
       maxRoundAttempts: MAX_ROUND_ATTEMPTS,
       skipAppOnlyTasks: settings.skipAppOnlyTasks,
-      skipSurpriseTask: settings.skipSurpriseTask !== false
+      skipSurpriseTask: settings.skipSurpriseTask === true
     }).filter((c) => !lateChecked.has(c.key));
     if (lateCandidates.length > 0) {
       for (const c of lateCandidates) lateChecked.add(c.key);
@@ -534,7 +534,7 @@ export async function runTasksPhase(ctx) {
     const next = pickNextTask(tasks, attempts, {
       maxAttemptsPerTask: settings.maxAttemptsPerTask,
       skipAppOnlyTasks: settings.skipAppOnlyTasks,
-      skipSurpriseTask: settings.skipSurpriseTask !== false,
+      skipSurpriseTask: settings.skipSurpriseTask === true,
       claimed,
       roundAttempts,
       maxRoundAttempts: MAX_ROUND_ATTEMPTS,
@@ -564,7 +564,7 @@ export async function runTasksPhase(ctx) {
       if (next.title) disabledTitles.add(next.title);
       const reason =
         next.action === 'skip_surprise'
-          ? 'opção — não funciona no site mobile'
+          ? 'opção das Opções'
           : 'exclusiva do app';
       if (!stats.skipped.includes(next.title)) {
         stats.skipped.push(next.title || '(sem título)');
