@@ -218,6 +218,7 @@ export async function runTasksPhase(ctx) {
   const claimed = new Set();
   let actions = 0;
   let guard = 0;
+  let drawerRetries = 0;
 
   while (actions < settings.maxTaskActions && guard < 80) {
     guard += 1;
@@ -242,11 +243,27 @@ export async function runTasksPhase(ctx) {
       continue;
     }
     if (!drawer.ok) {
+      // Recuperação: a aba pode ter ficado numa subpágina do coin-index (ex.:
+      // recommends.html do feed patrocinado) ou a gaveta falhou de forma
+      // transitória. Recarrega a central FORÇADO e tenta UMA vez antes de
+      // encerrar a fase — antes, uma única falha abandonava as tarefas restantes.
+      if (drawerRetries < 1) {
+        drawerRetries += 1;
+        const dbgRetry = drawer.debug ? ` Diagnóstico: ${JSON.stringify(drawer.debug)}` : '';
+        await appendLog(
+          ctx,
+          `Painel "Ganhe mais moedas" não abriu.${dbgRetry} Recarregando a central de moedas e tentando novamente.`
+        );
+        await ensureCoinPage(ctx, true);
+        await sleepAbortable(1500);
+        continue;
+      }
       const dbg = drawer.debug ? ` Diagnóstico: ${JSON.stringify(drawer.debug)}` : '';
       stats.errors.push(`Painel "Ganhe mais moedas" inacessível.${dbg}`.slice(0, 500));
       await appendLog(ctx, 'Falha ao abrir o painel de tarefas "Ganhe mais moedas".');
       break;
     }
+    drawerRetries = 0;
 
     const extraction = await safeTaskCommand(ctx, CMD.EXTRACT_TASKS, {}, 'tasks');
     if (extraction === null) {

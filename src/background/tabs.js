@@ -392,8 +392,19 @@ export function isAliexpressUrl(url) {
   return /https:\/\/([a-z0-9-]+\.)*aliexpress\.(com|us)\//i.test(url || '');
 }
 
-function isCoinUrl(url) {
-  return /coin-index/.test(url || '');
+/**
+ * true SOMENTE para a página da central de moedas (`/p/coin-index/index.html`).
+ * Subpáginas de coin-index NÃO são a central: a tarefa "Descubra itens
+ * patrocinados" navega a aba para `coin-index/recommends.html?from=mission…`
+ * (feed patrocinado), que não tem o botão/gaveta "Ganhe mais moedas". Com o
+ * teste antigo (`/coin-index/`), `ensureCoinPage` considerava a aba "já na
+ * central", não voltava, e o próximo OPEN_DRAWER falhava com "Painel Ganhe mais
+ * moedas inacessível" (cards: 0, drawerNode: false) — abandonando as tarefas
+ * restantes do run.
+ * @param {string} url
+ */
+export function isCoinUrl(url) {
+  return /\/p\/coin-index\/(index\.html)?([?#]|$)/i.test(url || '');
 }
 
 function sleep(ms) {

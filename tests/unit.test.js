@@ -22,6 +22,7 @@ import {
 } from '../src/common/state-utils.js';
 import { sendCmd, isNoContentScriptError } from '../src/background/context.js';
 import { getRunState, patchRunState } from '../src/background/storage.js';
+import { ensureCoinPage, isCoinUrl } from '../src/background/tabs.js';
 import { encryptText, decryptText } from '../src/common/crypt.js';
 import {
   coinsFromStreak,
@@ -546,6 +547,48 @@ test('storage: patchRunState serializa escritas concorrentes sem perder campos',
     assert.equal(finalState.tabId, 42);
     assert.equal(finalState.windowId, 7);
     assert.equal(finalState.message, 'Rodando');
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+  }
+});
+
+test('tabs: ensureCoinPage volta à central a partir de subpáginas coin-index (recommends.html)', async () => {
+  const originalChrome = globalThis.chrome;
+  const updates = [];
+  const RECOMMENDS_URL =
+    'https://m.aliexpress.com/p/coin-index/recommends.html?_immersiveMode=true&from=mission&idem_id=1792060116079';
+  globalThis.chrome = {
+    tabs: {
+      get: async () => ({ id: 9, status: 'complete', url: RECOMMENDS_URL }),
+      update: async (tabId, props) => {
+        updates.push({ tabId, props });
+        return {};
+      }
+    },
+    declarativeNetRequest: {
+      updateSessionRules: async () => {}
+    }
+  };
+  try {
+    // Só a central (`/p/coin-index/index.html`) é reconhecida: o feed de itens
+    // patrocinados (recommends.html) NÃO pode passar por "já na central" — era
+    // a causa do "Painel Ganhe mais moedas inacessível" (cards: 0) que abortava
+    // as tarefas restantes do run.
+    assert.equal(
+      isCoinUrl('https://m.aliexpress.com/p/coin-index/index.html?_immersiveMode=true&from=pc302#ac_run=1'),
+      true
+    );
+    assert.equal(isCoinUrl('https://m.aliexpress.com/p/coin-index/index.html'), true);
+    assert.equal(isCoinUrl('https://m.aliexpress.com/p/coin-index/'), true);
+    assert.equal(isCoinUrl(RECOMMENDS_URL), false);
+    assert.equal(isCoinUrl('https://www.aliexpress.com/p/coin-pc-index/mycoin.html'), false);
+    assert.equal(isCoinUrl('https://m.aliexpress.com/item/100500.html'), false);
+
+    await ensureCoinPage({ tabId: 9, settings: {} }, false);
+    assert.equal(updates.length, 1, 'deve navegar de volta à central');
+    assert.equal(updates[0].tabId, 9);
+    assert.match(updates[0].props.url, /\/p\/coin-index\/index\.html\?/);
   } finally {
     if (originalChrome === undefined) delete globalThis.chrome;
     else globalThis.chrome = originalChrome;
