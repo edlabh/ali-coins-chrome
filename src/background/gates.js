@@ -77,21 +77,21 @@ export async function twoFAGate(ctx) {
 
 /**
  * Login manual obrigatório: a extensão NÃO aguarda o login. Registra o erro
- * acionável, traz a tela de login para o primeiro plano, notifica e encerra a
- * execução — o usuário entra no AliExpress e executa a extensão novamente.
- * Marca `ctx.manualLoginRequired` para a política de janela PRESERVAR a tela
- * de login ao fim do run (ela seria fechada junto com a aba/janela normal).
+ * acionável, notifica e encerra a execução. No fim do run, a política de janela
+ * (finalize.js) converte a aba na TELA DE LOGIN DA VERSÃO DESKTOP e a preserva:
+ * o usuário entra nela e executa a extensão novamente.
+ * Marca `ctx.manualLoginRequired` para aquela conversão/preservação.
  * @param {object} ctx
  * @returns {Promise<{ok: false, manualLogin: true, error: string}>}
  */
 export async function requireManualLogin(ctx) {
   const message =
-    'Login manual necessário: o AliExpress não está logado. Faça login na tela trazida para frente e execute a extensão novamente.';
+    'Login manual necessário: o AliExpress não está logado. Faça login na tela da versão desktop (trazida para frente) e execute a extensão novamente.';
   ctx.manualLoginRequired = true;
-  await updatePhase(PHASE.AUTH, 'Login manual necessário — faça login e execute novamente.');
+  await updatePhase(PHASE.AUTH, 'Login manual necessário — faça login na versão desktop e execute novamente.');
   await appendLog(ctx, `⚠ ${message}`);
   if (ctx.settings.silentMode) {
-    await appendLog(ctx, 'Modo silencioso: trazendo a tela de login para frente.');
+    await appendLog(ctx, 'Modo silencioso: trazendo a tela para frente; o login será aberto na versão desktop.');
   }
   await focusWindow(ctx.windowId, ctx.tabId);
   await notify(ctx.settings, {

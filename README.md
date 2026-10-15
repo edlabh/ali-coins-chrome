@@ -6,7 +6,7 @@ Extensão Chrome (Manifest V3) que replica o projeto
 - abre uma **janela mobile emulando um Google Pixel 8**;
 - reutiliza a **sessão do seu perfil** no AliExpress (login é **100% manual** —
   a extensão nunca pede nem guarda credenciais; se a sessão expirar, avisa e
-  traz a tela de login para frente);
+  traz o login da versão desktop para frente);
 - realiza o **check-in diário de moedas**;
 - executa as tarefas do painel **"Ganhe mais moedas"** (produtos surpresa, busca,
   scroll/permanência, resgates);
@@ -37,9 +37,10 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
 1. Clique no ícone da extensão → **Opções**.
 2. **Login manual**: entre no AliExpress normalmente pelo navegador. A extensão reutiliza
    a **sessão do perfil** — nenhuma credencial é pedida ou guardada. Se a sessão expirar
-   durante uma execução, ela **termina com o erro "login manual necessário"**: a tela de
-   login é trazida para frente, uma notificação avisa e a tela **fica aberta** (não é
-   fechada junto com o run) — faça o login nela e execute a extensão novamente.
+   durante uma execução, ela **termina com o erro "login manual necessário"**: a aba é
+   convertida na **tela de login da versão desktop** (sem a emulação mobile) e trazida
+   para frente, uma notificação avisa e a tela **fica aberta** (não é fechada junto com o
+   run) — faça o login nela e execute a extensão novamente.
 3. Configure, se quiser:
    - **Agendamento**: todos os dias no horário `HH:MM` (fuso do seu computador);
    - **Executar ao abrir o Chrome**;
@@ -50,7 +51,7 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
      por padrão — desmarque a opção para voltar a tentá-la;
    - **Modo silencioso** (**padrão**): executa em uma **aba de fundo, sem abrir
      janela** — a aba só vem para frente se um captcha/2FA precisar de você (ou para
-     mostrar a tela de login quando a sessão expirar);
+     abrir o login da versão desktop quando a sessão expirar);
      desmarque para acompanhar a execução numa janela visível;
    - **Notificação condicional** (opcional): avisar apenas quando houver novidade
      (check-in novo, crédito do dia ou tarefas executadas) — erros sempre avisam;
@@ -75,8 +76,9 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
 ```
 janela Pixel 8 → m.aliexpress.com/coin-index
    → sessão já ativa? login é dispensado; senão:
-     LOGIN MANUAL: execução termina com erro acionável — tela de login trazida
-     para frente (fica aberta) + notificação "faça login e execute novamente"
+     LOGIN MANUAL: execução termina com erro acionável — a aba vira a tela de
+     login DESKTOP (sem emulação mobile), trazida para frente e mantida aberta
+     + notificação "faça login e execute a extensão novamente"
    → check-in diário (#signButton) + confirmação do marcador "today-checked"
    → tarefas "Ganhe mais moedas":
         busca (fone bluetooth) • scroll ≥16s (descontos) • resgates (COLLECT)
@@ -89,7 +91,7 @@ janela Pixel 8 → m.aliexpress.com/coin-index
 | Capacidade | ali-coins (Node/Playwright) | Esta extensão (MV3) |
 | --- | --- | --- |
 | Emulação mobile | Pixel 7 (Playwright `devices`) | Pixel 8 via janela 412×915 + UA/Client Hints (DNR) |
-| Login | usuário/senha + slide captcha | sessão do perfil; se expirar, **erro acionável + tela de login** (sem credenciais) |
+| Login | usuário/senha + slide captcha | sessão do perfil; se expirar, **erro acionável + login da versão desktop** (sem credenciais) |
 | Check-in | `#signButton` + confirmação + streak | idêntico (mesmos seletores/fallbacks) |
 | Tarefas | surpresa/busca/scroll/resgate, gaveta `.e2e_task` | idêntico (Explore itens surpresa ignorada por padrão) |
 | Captcha | tenta deslizar automaticamente | pausa e aguarda o usuário resolver, sem tempo máximo (por design) |
@@ -182,9 +184,10 @@ Decisões de projeto relevantes:
   Detecção por `#nc_1_n1z`, `.btn_slide`, containers `nocaptcha`/`baxia` e iframes.
   Sem tempo máximo: resolve ou cancele pelo popup.
 - **Login**: 100% manual — a extensão nunca pede nem guarda credenciais. Quando o
-  AliExpress pede login, a execução termina com erro acionável: a tela de login é trazida
-  para frente, **preservada ao fim do run**, e uma notificação avisa para entrar e executar
-  a extensão novamente.
+  AliExpress pede login, a execução termina com erro acionável: a aba é convertida na
+  **tela de login da versão desktop** (sem emulação mobile — UA/Client Hints e viewport
+  são removidos), trazida para frente e **preservada ao fim do run**, e uma notificação
+  avisa para entrar e executar a extensão novamente.
 - **Tarefas de app** (Prize Land, minigames, quizzes, avaliações) são ignoradas por padrão,
   como no ali-coins (`SKIP_APP_ONLY_TASKS=true`).
 
@@ -215,7 +218,7 @@ publica automaticamente a GitHub Release ao enviar uma tag `v*`.
 
 - **Captcha e 2FA são manuais** — aguardam o usuário resolver (sem tempo máximo) e a
   automação prossegue sozinha. **Sessão expirada** encerra a execução com o aviso para
-  fazer login e executar novamente.
+  fazer login na versão desktop e executar novamente.
 - **RGV587** (controle de risco do AliExpress): a execução é encerrada por precaução
   (sem pausa fixa) — você decide quando rodar de novo.
 - Layouts A/B do AliExpress podem quebrar seletores pontuais; os fallbacks por texto e

@@ -628,6 +628,7 @@ test('auth: sessão expirada encerra com erro acionável e traz a tela de login 
       }
     },
     windows: {
+      get: async () => ({ id: 5, state: 'normal' }),
       update: async (windowId, props) => {
         focusCalls.windows.push({ windowId, props });
         return {};
@@ -653,11 +654,12 @@ test('auth: sessão expirada encerra com erro acionável e traz a tela de login 
     const res = await ensureAuthenticated(ctx);
     assert.equal(res.ok, false, 'login manual NÃO aguarda: encerra com erro');
     assert.equal(res.manualLogin, true);
+    assert.match(res.error, /versão desktop/);
     assert.match(res.error, /execute a extensão novamente/);
     assert.equal(
       ctx.manualLoginRequired,
       true,
-      'a política de janela deve preservar a tela de login'
+      'a política de janela deve converter/preservar a tela de login'
     );
     assert.ok(
       focusCalls.tabs.some((c) => c.tabId === 9 && c.props.active === true),
@@ -669,9 +671,12 @@ test('auth: sessão expirada encerra com erro acionável e traz a tela de login 
     );
     assert.ok(
       notifications.some(
-        (n) => n.id === 'ali-coins-manual-login' && n.opts.requireInteraction === true
+        (n) =>
+          n.id === 'ali-coins-manual-login' &&
+          n.opts.requireInteraction === true &&
+          /versão desktop/.test(n.opts.message)
       ),
-      'notificação "login manual necessário" com requireInteraction'
+      'notificação "login manual necessário" (versão desktop) com requireInteraction'
     );
     assert.ok(
       ctx.log.some((l) => /Login manual necessário/.test(l.msg)),
@@ -683,11 +688,15 @@ test('auth: sessão expirada encerra com erro acionável e traz a tela de login 
   }
 });
 
-test('finalize: applyWindowPolicy preserva a tela de login quando o login manual foi exigido', async () => {
+test('finalize: applyWindowPolicy converte e preserva a tela de login da versão desktop', async () => {
   const originalChrome = globalThis.chrome;
   let sessionData = {};
   const removedTabs = [];
   const removedWindows = [];
+  const tabUpdates = [];
+  const windowUpdates = [];
+  const dnrCalls = [];
+  const detachCalls = [];
   globalThis.chrome = {
     storage: {
       session: {
@@ -702,29 +711,66 @@ test('finalize: applyWindowPolicy preserva a tela de login quando o login manual
     },
     tabs: {
       get: async () => ({ id: 9, windowId: 5, status: 'complete' }),
+      update: async (tabId, props) => {
+        tabUpdates.push({ tabId, props });
+        return {};
+      },
       remove: async (tabId) => {
         removedTabs.push(tabId);
       }
     },
     windows: {
-      get: async () => ({ id: 5, type: 'normal' }),
+      get: async () => ({ id: 5, type: 'normal', state: 'normal' }),
+      update: async (windowId, props) => {
+        windowUpdates.push({ windowId, props });
+        return {};
+      },
       remove: async (windowId) => {
         removedWindows.push(windowId);
       }
     },
-    declarativeNetRequest: { updateSessionRules: async () => {} },
-    debugger: { detach: async () => {} }
+    declarativeNetRequest: {
+      updateSessionRules: async (arg) => {
+        dnrCalls.push(arg);
+      }
+    },
+    debugger: {
+      detach: async (target) => {
+        detachCalls.push(target);
+      }
+    }
   };
   try {
     // Modo silencioso + keepWindowOpen desligado: o padrão FECHARIA a aba — com
-    // login manual exigido, a tela de login precisa sobreviver ao fim do run.
+    // login manual exigido, a aba vira a tela de login DESKTOP e sobrevive.
     const ctx = { tabId: 9, windowId: 5, manualLoginRequired: true, log: [] };
     await applyWindowPolicy(ctx, { silentMode: true, keepWindowOpen: false });
+
     assert.equal(removedTabs.length, 0, 'a aba da tela de login NÃO pode ser fechada');
     assert.equal(removedWindows.length, 0, 'a janela do usuário NÃO pode ser fechada');
     assert.ok(
+      dnrCalls.some((c) => Array.isArray(c.removeRuleIds) && c.removeRuleIds.includes(9001)),
+      'as regras mobile (UA/Client Hints) devem sair para o login desktop'
+    );
+    assert.ok(
+      detachCalls.some((c) => c.tabId === 9),
+      'o CDP deve ser desanexado (sem viewport/UA emulados no login desktop)'
+    );
+    assert.ok(
+      tabUpdates.some((c) => c.tabId === 9 && c.props.url === 'https://login.aliexpress.com/'),
+      'a aba deve navegar para a tela de login da versão desktop'
+    );
+    assert.ok(
+      windowUpdates.some((c) => c.windowId === 5 && c.props.focused === true),
+      'a janela deve ser trazida para frente'
+    );
+    assert.ok(
+      ctx.log.some((l) => /versão desktop/.test(l.msg)),
+      'o relatório deve explicar a tela de login desktop'
+    );
+    assert.ok(
       ctx.log.some((l) => /Tela de login mantida aberta/.test(l.msg)),
-      'o relatório deve explicar que a tela ficou aberta para o login'
+      'o relatório deve indicar que a tela ficou aberta'
     );
   } finally {
     if (originalChrome === undefined) delete globalThis.chrome;

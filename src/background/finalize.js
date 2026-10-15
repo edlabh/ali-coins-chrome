@@ -3,7 +3,7 @@
  * (relatório, notificação, política de janela/aba).
  */
 
-import { CMD, PHASE, RUN_STATUS } from '../common/constants.js';
+import { CMD, DESKTOP_LOGIN_URL, PHASE, RUN_STATUS } from '../common/constants.js';
 import { computeTasksCoinsGained, desktopStreakOf } from '../common/accounting.js';
 import { toNumberOrNull } from '../common/format.js';
 import { formatDuration } from '../common/schedule.js';
@@ -13,7 +13,13 @@ import { commandWithCaptcha } from './gates.js';
 import { readLedger } from './ledger-read.js';
 import { notifyResult, setBadge } from './notify.js';
 import { patchRunState, pushReport } from './storage.js';
-import { clearDeviceRules, closeLedgerTab, ensureCoinPage } from './tabs.js';
+import {
+  clearDeviceRules,
+  closeLedgerTab,
+  ensureCoinPage,
+  focusWindow,
+  navigateTab
+} from './tabs.js';
 
 /**
  * Contabilidade final: relê o extrato desktop e fecha os números do run
@@ -79,30 +85,38 @@ export async function runFinalAccounting(ctx, checkin, initialBalanceForTasks, p
 /**
  * Fecha a janela/aba no fim do run conforme a preferência (keepWindowOpen).
  * Fechando a janela, as session rules da aba são descartadas junto.
- * Exceção: quando o login manual foi solicitado (ctx.manualLoginRequired), a
- * tela de login é SEMPRE preservada — o usuário precisa entrar nela e executar
- * a extensão novamente.
+ * Exceção: quando o login manual foi exigido (ctx.manualLoginRequired), a aba é
+ * convertida na TELA DE LOGIN DA VERSÃO DESKTOP (sem emulação mobile) e SEMPRE
+ * preservada — o usuário precisa entrar nela e executar a extensão novamente.
  */
 export async function applyWindowPolicy(ctx, settings) {
   if (!ctx.windowId) return;
   if (ctx.tabId) await detachCdp(ctx.tabId).catch(() => {});
 
-  const keepOpen = Boolean(settings.keepWindowOpen || ctx.manualLoginRequired);
-  if (ctx.manualLoginRequired && !settings.keepWindowOpen) {
+  // Login manual exigido: converte a aba na tela de login da versão desktop
+  // (remove UA/Client Hints mobile e a viewport emulada), traz para frente e
+  // NÃO fecha nada — a tela fica aberta para o usuário entrar.
+  if (ctx.manualLoginRequired) {
+    await clearDeviceRules().catch(() => {});
+    if (ctx.tabId) {
+      await appendLog(ctx, 'Abrindo a tela de login da versão desktop (sem emulação mobile)…');
+      await navigateTab(ctx.tabId, DESKTOP_LOGIN_URL, 30000).catch(() => {});
+    }
     await appendLog(
       ctx,
-      'Tela de login mantida aberta — faça login no AliExpress e execute a extensão novamente.'
+      'Tela de login mantida aberta — faça login na versão desktop e execute a extensão novamente.'
     );
+    await focusWindow(ctx.windowId, ctx.tabId || null);
+    await closeLedgerTab();
+    return;
   }
 
   // Modo silencioso: a aba vive em uma janela normal do usuário — NUNCA fechar
   // a janela dele; no máximo a própria aba de execução (e uma janela popup
   // vazia, caso a aba tenha sido reaproveitada de uma abertura manual).
   if (settings.silentMode) {
-    if (keepOpen) {
-      if (!ctx.manualLoginRequired) {
-        await appendLog(ctx, 'Modo silencioso: aba de execução mantida aberta (configuração).');
-      }
+    if (settings.keepWindowOpen) {
+      await appendLog(ctx, 'Modo silencioso: aba de execução mantida aberta (configuração).');
     } else if (ctx.tabId) {
       await appendLog(ctx, 'Concluído — fechando a aba de execução (modo silencioso).');
       const tabInfo = await chrome.tabs.get(ctx.tabId).catch(() => null);
@@ -123,10 +137,8 @@ export async function applyWindowPolicy(ctx, settings) {
     return;
   }
 
-  if (keepOpen) {
-    if (!ctx.manualLoginRequired) {
-      await appendLog(ctx, 'Janela mobile mantida aberta (configuração).');
-    }
+  if (settings.keepWindowOpen) {
+    await appendLog(ctx, 'Janela mobile mantida aberta (configuração).');
     await closeLedgerTab();
     return;
   }

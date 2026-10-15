@@ -338,7 +338,13 @@ export async function closeLedgerTab() {
  */
 export async function focusWindow(windowId, tabId = null) {
   try {
-    await chrome.windows.update(windowId, { focused: true, drawAttention: true, state: 'normal' });
+    const win = await chrome.windows.get(windowId).catch(() => null);
+    const update = { focused: true, drawAttention: true };
+    // Restaura apenas janela MINIMIZADA (ex.: popup de execução reaproveitado);
+    // NUNCA desmaximiza a janela do usuário — o modo silencioso compartilha uma
+    // janela normal dele.
+    if (win && win.state === 'minimized') update.state = 'normal';
+    await chrome.windows.update(windowId, update);
   } catch {
     // Ignora janela fechada.
   }

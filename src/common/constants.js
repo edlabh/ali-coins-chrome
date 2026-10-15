@@ -8,6 +8,12 @@ export const COIN_URL = 'https://m.aliexpress.com/p/coin-index/index.html';
 export const COIN_URL_TASKS = `${COIN_URL}?_immersiveMode=true&from=pc302`;
 /** Extrato desktop de moedas (página mycoin) — fonte de verdade da contabilidade. */
 export const MYCOIN_URL = 'https://www.aliexpress.com/p/coin-pc-index/mycoin.html';
+/**
+ * Entrada do LOGIN DESKTOP (redireciona para a página unificada atual do
+ * AliExpress — ug-login-page). Usada quando o login manual é exigido: a aba de
+ * execução é convertida nesta página, SEM a emulação mobile.
+ */
+export const DESKTOP_LOGIN_URL = 'https://login.aliexpress.com/';
 
 /** Presets de emulação. width/height = viewport CSS (sem decoração da janela). */
 export const DEVICE_PRESETS = {
@@ -149,7 +155,7 @@ export const CAPTCHA_NOTIFICATION = {
 export const MANUAL_LOGIN_NOTIFICATION = {
   title: 'Ali Coins: login manual necessário',
   message:
-    'O AliExpress não está logado. Faça login na tela aberta e execute a extensão novamente.'
+    'O AliExpress não está logado. Faça login na tela da versão desktop e execute a extensão novamente.'
 };
 
 export function pickDevice(settings) {
