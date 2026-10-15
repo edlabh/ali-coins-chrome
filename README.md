@@ -176,7 +176,10 @@ Decisões de projeto relevantes:
   (criada inativa na última janela em uso) — nada de janela nova na tela. Como a
   aba não tem o tamanho físico do aparelho, a viewport do Pixel 8 é emulada via
   CDP (`Emulation.setDeviceMetricsOverride` 412×915 + toque + foco), e o próprio
-  depurador impede o congelamento da aba em segundo plano. Limitação honesta:
+  depurador impede o congelamento da aba em segundo plano. As páginas de tarefa
+  abrem **no fluxo nativo do site** (aba nova, como na v0.3.3 e no projeto de
+  origem) — o guarda de abas **desativa a aba na hora** e devolve o foco para
+  você, e a aba é **fechada ao fim de cada tarefa**. Limitação honesta:
   **não existe "headless" real para extensões** — o Chrome precisa estar aberto e
   a aba existe (oculta); se um captcha/2FA/login exigir sua ação, a aba é trazida
   para frente automaticamente e volta ao fundo depois.

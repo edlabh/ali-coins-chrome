@@ -68,35 +68,6 @@
   }
 
   /**
-   * Reescreve `target="_blank"` (ou qualquer target != `_self`) no elemento,
-   * seus ancestrais, seus descendentes e `<base target>` antes de um clique.
-   * Garante que nenhum clique da automação abra uma nova aba em primeiro plano.
-   * @param {Element | null | undefined} el
-   */
-  function sanitizeTargets(el) {
-    try {
-      if (el) {
-        let cur = el;
-        while (cur && cur !== document) {
-          if (cur.getAttribute) {
-            const t = cur.getAttribute('target');
-            if (t && t.toLowerCase() !== '_self') cur.setAttribute('target', '_self');
-          }
-          cur = cur.parentElement;
-        }
-      }
-      for (const node of document.querySelectorAll('[target]')) {
-        const t = node.getAttribute('target');
-        if (t && t.toLowerCase() !== '_self') {
-          node.setAttribute('target', '_self');
-        }
-      }
-    } catch {
-      // segue
-    }
-  }
-
-  /**
    * Clique "humano": sequência de eventos de ponteiro + click().
    * Os eventos sintéticos bastam para os handlers do AliExpress (o próprio
    * ali-coins usa el.click() via evaluate como fallback em vários pontos).
@@ -104,7 +75,6 @@
    */
   function clickHuman(el) {
     if (!el) return false;
-    sanitizeTargets(el);
     try {
       el.scrollIntoView({ block: 'center', inline: 'center' });
     } catch {
@@ -461,7 +431,6 @@
     isVisible,
     queryVisible,
     waitUntil,
-    sanitizeTargets,
     clickHuman,
     clickableFrom,
     setNativeValue,

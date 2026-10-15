@@ -514,51 +514,6 @@ test('main-world spoofa navigator apenas na aba de execução', () => {
   });
 });
 
-test('main-world intercepta window.open na aba de execução e navega na mesma aba', () => {
-  const code = readFileSync(path.join(root, 'src/content/main-world.js'), 'utf8');
-  let openedPopup = null;
-  let assignedUrl = null;
-  const sandbox = {
-    console,
-    open(url) {
-      openedPopup = url;
-      return { popup: true };
-    },
-    location: {
-      hash: '',
-      assign(url) {
-        assignedUrl = url;
-      }
-    },
-    sessionStorage: {
-      _v: null,
-      getItem(k) {
-        return k === 'ac_run' ? this._v : null;
-      },
-      setItem(k, v) {
-        if (k === 'ac_run') this._v = v;
-      }
-    }
-  };
-  sandbox.self = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext('var navigator = {};', sandbox);
-  vm.runInContext(code, sandbox, { filename: 'main-world.js' });
-
-  // Fora da aba de execução: window.open normal funciona sem interferência.
-  sandbox.self.open('https://example.com/normal');
-  assert.equal(openedPopup, 'https://example.com/normal');
-  assert.equal(assignedUrl, null);
-
-  // Na aba de execução: window.open navega na própria aba (location.assign) sem criar aba nova.
-  openedPopup = null;
-  sandbox.sessionStorage.setItem('ac_run', '1');
-  const ret = sandbox.self.open('https://m.aliexpress.com/item/1.html', '_blank');
-  assert.equal(openedPopup, null, 'não deve abrir nova aba/janela');
-  assert.equal(assignedUrl, 'https://m.aliexpress.com/item/1.html');
-  assert.equal(ret.location, sandbox.location);
-});
-
 test('storage: saveSettings descarta campos legados (credenciais/cooldown) e mantém o resto', async () => {
   const originalChrome = globalThis.chrome;
   let localData = {};

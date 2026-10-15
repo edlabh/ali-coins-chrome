@@ -74,40 +74,18 @@ chrome.tabs.onCreated.addListener(async (tab) => {
     const owned = spawnedByRunTab || isRunOwnedTab(tab.id, tab, runState);
     if (!owned) return;
 
-    // 1. Mantém o foco na aba do usuário e força a nova aba para segundo plano.
+    // Fluxo restaurado (v0.4.5, igual à v0.3.3 + projeto de origem): a página da
+    // tarefa DEVE abrir na própria aba/nova aba do site — é assim que o
+    // AliExpress contabiliza a visita. O guarda apenas mantém o foco na SUA aba
+    // e força a nova aba para segundo plano; ela será adotada pelo loop de
+    // tarefas (adoptTaskTab) e fechada ao fim da rodada (restoreTaskTab). Abas
+    // realmente órfãs são limpas por closeOrphanTabs entre as tarefas.
     if (shouldKeepSilent(runState)) {
       const targetUserTab = runState.userTabId || lastUserTabId;
       if (targetUserTab && targetUserTab !== tab.id) {
         await chrome.tabs.update(targetUserTab, { active: true }).catch(() => {});
       }
       await chrome.tabs.update(tab.id, { active: false }).catch(() => {});
-    }
-
-    // 2. Se a aba de execução abriu uma nova aba (apesar do bloqueio de
-    // window.open/target="_blank"), transfere a URL para a própria aba de
-    // fundo (runState.tabId) e fecha a aba extra imediatamente.
-    if (spawnedByRunTab && runState.tabId) {
-      let targetUrl = tab.pendingUrl || tab.url || '';
-      if (!targetUrl || targetUrl === 'about:blank') {
-        for (let i = 0; i < 6; i += 1) {
-          await new Promise((r) => setTimeout(r, 120));
-          const fresh = await chrome.tabs.get(tab.id).catch(() => null);
-          if (!fresh) return;
-          targetUrl = fresh.pendingUrl || fresh.url || '';
-          if (targetUrl && targetUrl !== 'about:blank') break;
-        }
-      }
-      // NÃO fecha a aba se o loop de tarefas a ADOTOU nesse meio-tempo
-      // (runState.tabId passou a apontar para ela): nesse caso ela é a aba da
-      // rodada e será fechada por restoreTaskTab ao fim da tarefa. Fechá-la aqui
-      // fazia os comandos seguintes falharem numa aba morta e a coleta das
-      // tarefas restantes era abandonada.
-      const nowState = await getRunState();
-      if (nowState && nowState.active && nowState.tabId === tab.id) return;
-      await chrome.tabs.remove(tab.id).catch(() => {});
-      if (targetUrl && targetUrl !== 'about:blank') {
-        await chrome.tabs.update(nowState?.tabId || runState.tabId, { url: targetUrl, active: false }).catch(() => {});
-      }
     }
   } catch {
     // Aba já fechada: ignora.

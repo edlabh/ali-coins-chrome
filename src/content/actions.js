@@ -23,14 +23,12 @@
    */
   async function smartClick(el) {
     if (!el) return false;
-    AC.dom.sanitizeTargets(el);
     try {
       el.scrollIntoView({ block: 'center', inline: 'center' });
     } catch {
       // segue com a posição atual
     }
     await sleep(120);
-    AC.dom.sanitizeTargets(el);
     const rect = el.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) {
       const x = Math.round(rect.left + rect.width / 2);

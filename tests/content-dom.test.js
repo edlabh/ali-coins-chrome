@@ -453,22 +453,3 @@ test('AÇÕES: clickTask realoca a linha pelo título quando o índice mudou', a
   assert.equal(res.clicked, true);
   assert.equal(navClicks, 1, 'o clique deve ir para a linha com o título correto');
 });
-
-test('DOM: sanitizeTargets converte target="_blank" em "_self" antes do clique', async () => {
-  const env = createContentEnv(`
-    <div class="e2e_normal_task">
-      <div class="e2e_normal_task_content_title">Ofertas</div>
-      <div class="e2e_normal_task_right">
-        <a id="task-link" href="/p/deals" target="_blank">
-          <button class="e2e_normal_task_right_btn">GO</button>
-        </a>
-      </div>
-    </div>
-    <a id="other-link" href="/item/99" target="_blank">Item</a>
-  `);
-  env.setSendMessageHandler(async () => ({ ok: true }));
-
-  await env.AC.actions.clickTask({ index: 0, title: 'Ofertas' });
-  assert.equal(env.window.document.getElementById('task-link').getAttribute('target'), '_self');
-  assert.equal(env.window.document.getElementById('other-link').getAttribute('target'), '_self');
-});

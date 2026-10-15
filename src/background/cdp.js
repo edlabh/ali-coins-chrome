@@ -20,7 +20,15 @@ const scriptInjectedTabs = new Set();
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const NEW_DOC_STEALTH_SCRIPT = `
+// Marca a aba de execução ANTES de qualquer script da página rodar (usado pelo
+// spoof de navigator do MAIN world desde a primeira linha do documento).
+// IMPORTANTE (v0.4.5): este script NÃO sobrescreve mais window.open/target/etc.
+// — a v0.3.4 fazia essa interceptação para evitar abas em primeiro plano, mas
+// ela quebrou o credito das tarefas no AliExpress (a navegação in-place
+// descarrega a central antes do site registrar a tarefa). O fluxo correto —
+// igual à v0.3.3 e ao projeto de origem — é deixar o site abrir a página da
+// tarefa em ABA NOVA e mantê-la em segundo plano pelos guardas de foco.
+const NEW_DOC_RUN_TAB_SCRIPT = `
 (function () {
   try {
     self.__acRunTab = true;
@@ -28,50 +36,11 @@ const NEW_DOC_STEALTH_SCRIPT = `
   } catch (e) {
     self.__acRunTab = true;
   }
-  try {
-    self.open = function (url) {
-      if (url && typeof url === 'string' && url !== 'about:blank' && !/^javascript:/i.test(url)) {
-        try { location.assign(url); } catch (e) {}
-      }
-      return self;
-    };
-  } catch (e) {}
-  try {
-    if (typeof Element !== 'undefined' && Element.prototype && Element.prototype.setAttribute) {
-      var origSetAttr = Element.prototype.setAttribute;
-      Element.prototype.setAttribute = function (name, value) {
-        if (typeof name === 'string' && name.toLowerCase() === 'target' && typeof value === 'string' && value.toLowerCase() !== '_self') {
-          return origSetAttr.call(this, name, '_self');
-        }
-        return origSetAttr.call(this, name, value);
-      };
-    }
-  } catch (e) {}
-  try {
-    if (typeof HTMLAnchorElement !== 'undefined' && HTMLAnchorElement.prototype) {
-      var desc = Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'target');
-      if (desc && desc.set) {
-        Object.defineProperty(HTMLAnchorElement.prototype, 'target', {
-          configurable: true,
-          enumerable: true,
-          get: function () { return '_self'; },
-          set: function () { desc.set.call(this, '_self'); }
-        });
-      }
-      if (HTMLAnchorElement.prototype.click) {
-        var origClick = HTMLAnchorElement.prototype.click;
-        HTMLAnchorElement.prototype.click = function () {
-          try { this.setAttribute('target', '_self'); } catch (e) {}
-          return origClick.apply(this, arguments);
-        };
-      }
-    }
-  } catch (e) {}
 })();
 `;
 
 /**
- * Garante que a aba anexada tenha o script de bloqueio de novas abas injetado
+ * Garante que a aba anexada tenha o marcador de "aba de execução" injetado
  * antes de qualquer documento/subdomínio carregar.
  * @param {number} tabId
  */
@@ -80,7 +49,7 @@ async function ensureNewDocScript(tabId) {
   try {
     await chrome.debugger.sendCommand({ tabId }, 'Page.enable', {});
     await chrome.debugger.sendCommand({ tabId }, 'Page.addScriptToEvaluateOnNewDocument', {
-      source: NEW_DOC_STEALTH_SCRIPT
+      source: NEW_DOC_RUN_TAB_SCRIPT
     });
     scriptInjectedTabs.add(tabId);
   } catch {
@@ -173,10 +142,6 @@ export async function applySilentEmulation(tabId, settings) {
     });
     await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
     await send('Emulation.setFocusEmulationEnabled', { enabled: true });
-    await send('Emulation.setUserAgentOverride', {
-      userAgent: device.userAgent,
-      platform: 'Linux armv8l'
-    }).catch(() => {});
     return true;
   } catch {
     return false;

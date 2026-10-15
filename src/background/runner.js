@@ -167,9 +167,9 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
 
     if (await isStopRequestedNow()) throw new RunAbortedError();
 
-    // 1. Janela/aba de fundo + snapshot de abas + CDP (viewport 412×915 e
-    // bloqueio de window.open/target="_blank") ANTES da primeira navegação,
-    // para que nenhuma aba apareça em primeiro plano e o primeiro load já seja mobile.
+    // 1. Janela/aba de fundo + snapshot de abas + CDP (viewport 412×915) ANTES
+    // da primeira navegação, para que nenhuma aba apareça em primeiro plano e o
+    // primeiro load já seja mobile.
     let cdpReady = false;
     let emuOk = false;
     const win = await prepareRunTab(ctx.settings, {

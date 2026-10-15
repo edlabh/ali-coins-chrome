@@ -51,9 +51,9 @@ async function recoverToCoinPage(ctx, type) {
     ctx,
     `Sem content script durante ${type} — a aba saiu do AliExpress; retornando à central (a execução continua).`
   );
-  // A aba ADOTADA da tarefa pode ter sido fechada pelo guarda de abas do
-  // service worker: restaura a aba principal ANTES de tentar navegar (antes, o
-  // comando seguinte ia para uma aba morta e derrubava a fase sem recuperação).
+  // A aba ADOTADA da tarefa pode ter sido fechada pelo site/navegador:
+  // restaura a aba principal ANTES de tentar navegar (antes, o comando seguinte
+  // ia para uma aba morta e derrubava a fase sem recuperação).
   if (ctx.taskTabId) {
     await restoreTaskTab(ctx).catch(() => {});
   }
@@ -107,10 +107,10 @@ async function adoptTaskTab(ctx) {
   );
   if (!candidate) return false;
 
-  // O guarda de abas do service worker pode fechar a aba a qualquer momento
-  // (transferindo a URL para a aba principal): confirma que ela ainda existe
-  // ANTES de adotar — adotar uma aba já fechada fazia os comandos seguintes
-  // falharem em "Sem content script" e derrubavam a fase inteira.
+  // A aba pode ter sido fechada pelo site/navegador a qualquer momento:
+  // confirma que ela ainda existe ANTES de adotar — adotar uma aba já fechada
+  // fazia os comandos seguintes falharem em "Sem content script" e derrubavam a
+  // fase inteira.
   const preAlive = await chrome.tabs.get(candidate.id).catch(() => null);
   if (!preAlive) return false;
 
@@ -128,9 +128,9 @@ async function adoptTaskTab(ctx) {
   await applyDeviceRules(ctx.previousTabId, ctx.settings, [candidate.id]).catch(() => {});
   await waitTabComplete(candidate.id, 20000);
 
-  // ...e DEPOIS de adotar: se a aba sumiu nesse meio-tempo (fechada pelo guarda
-  // de abas), desfaz a adoção e a rodada segue na aba PRINCIPAL — para onde a
-  // URL foi transferida — em vez de operar numa aba morta.
+  // ...e DEPOIS de adotar: se a aba sumiu nesse meio-tempo (fechada pelo site
+  // ou pelo usuário), desfaz a adoção e a rodada segue na aba PRINCIPAL em vez
+  // de operar numa aba morta.
   const postAlive = await chrome.tabs.get(candidate.id).catch(() => null);
   if (!postAlive) {
     await restoreTaskTab(ctx).catch(() => {});
