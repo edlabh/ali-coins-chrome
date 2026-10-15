@@ -5,7 +5,16 @@
 
 import { CMD, PHASE } from '../common/constants.js';
 import { randInt } from '../common/schedule.js';
-import { pickNextTask, summarizeTasks, taskKey } from '../common/state-utils.js';
+import {
+  applyTaskProgress,
+  claimKey,
+  pickNextTask,
+  resetTaskTracking,
+  roundKeyOf,
+  selectLateProgressCandidates,
+  summarizeTasks,
+  taskKey
+} from '../common/state-utils.js';
 import { truncate } from '../common/format.js';
 import {
   RunAbortedError,
@@ -237,13 +246,32 @@ async function settleAfterSurpriseTap(ctx, beforeUrl, feedUrl) {
   await sleepAbortable(600);
 }
 
+// Confirmação extra antes de aceitar "sem progresso" numa rodada: o status do
+// AliExpress costuma chegar alguns segundos depois da ação (mesma janela de
+// LATE_PROGRESS_CONFIRM_MS do ali-coins).
+const LATE_PROGRESS_CONFIRM_MS = 4000;
+// Cap de tentativas por RODADA (título + status "n/m"): sem progresso após N
+// tentativas na MESMA rodada, a tarefa falha. Avanço de rodada cria uma chave
+// nova (e o progresso observado zera as tentativas do título) — igual ao
+// TASK_ROUND_MAX_ATTEMPTS do ali-coins.
+const MAX_ROUND_ATTEMPTS = 3;
+
 /**
  * @param {object} ctx
  */
 export async function runTasksPhase(ctx) {
   const { settings, stats } = ctx;
   const attempts = stats.taskAttempts;
+  // Tentativas por rodada (título + statusText), falhas por título e memória do
+  // último progresso/status visto — máquina de estados do ali-coins.
+  const roundAttempts = {};
+  const failed = {};
+  const progressMap = {};
+  const statusMap = {};
+  // Tarefas ignoradas por configuração (app-only/surpresa): nunca reabertas.
+  const disabledTitles = new Set();
   const claimed = new Set();
+  const lateChecked = new Set();
   let actions = 0;
   let guard = 0;
   let drawerRetries = 0;
@@ -332,6 +360,7 @@ export async function runTasksPhase(ctx) {
       if (!t) continue;
       const kind = t.kind || 'scroll';
       if (!shouldSkipKind(kind)) continue;
+      if (t.title) disabledTitles.add(t.title);
       const key = taskKey(t);
       if ((attempts[key] || 0) < settings.maxAttemptsPerTask) {
         attempts[key] = settings.maxAttemptsPerTask;
@@ -347,12 +376,76 @@ export async function runTasksPhase(ctx) {
       }
     }
 
+    // Progresso observado no painel reinicia tentativas/falhas (a progressão do
+    // AliExpress chega com ATRASO): sem isso, uma tarefa que já avançou de
+    // rodada ficava bloqueada pelo resto da execução — era o sintoma de
+    // "executou só a primeira rodada" em tarefas "n/m" (ex.: super descontos).
+    const advanced = applyTaskProgress(tasks, {
+      attempts,
+      roundAttempts,
+      progressMap,
+      statusMap,
+      failed,
+      disabled: disabledTitles
+    });
+    for (const title of advanced) {
+      await appendLog(
+        ctx,
+        `Tarefa "${truncate(title, 60)}" avançou de rodada — tentativas resetadas (progresso confirmado).`
+      );
+    }
+
+    // Confirmação de progresso tardio: rodada com tentativas esgotadas e ainda
+    // sem falha — relê o painel uma vez após alguns segundos antes de desistir.
+    const lateCandidates = selectLateProgressCandidates(tasks, {
+      roundAttempts,
+      failed,
+      disabled: disabledTitles,
+      maxRoundAttempts: MAX_ROUND_ATTEMPTS,
+      skipAppOnlyTasks: settings.skipAppOnlyTasks,
+      skipSurpriseTask: settings.skipSurpriseTask !== false
+    }).filter((c) => !lateChecked.has(c.key));
+    if (lateCandidates.length > 0) {
+      for (const c of lateCandidates) lateChecked.add(c.key);
+      await appendLog(
+        ctx,
+        `Possível progresso tardio em ${lateCandidates.length} tarefa(s) (${lateCandidates
+          .map((c) => truncate(c.title, 40))
+          .join(' | ')}); relendo o painel em ${Math.round(LATE_PROGRESS_CONFIRM_MS / 1000)}s antes de desistir.`
+      );
+      await sleepAbortable(LATE_PROGRESS_CONFIRM_MS);
+      const confirm = await safeTaskCommand(ctx, CMD.EXTRACT_TASKS, {}, 'tasks');
+      if (confirm && Array.isArray(confirm.tasks) && confirm.tasks.length > 0) {
+        tasks = confirm.tasks;
+        const confirmed = applyTaskProgress(tasks, {
+          attempts,
+          roundAttempts,
+          progressMap,
+          statusMap,
+          failed,
+          disabled: disabledTitles
+        });
+        for (const title of confirmed) {
+          await appendLog(ctx, `Progresso tardio confirmado em "${truncate(title, 60)}".`);
+        }
+      }
+    }
+
+    const failedBefore = new Set(Object.keys(failed));
     const next = pickNextTask(tasks, attempts, {
       maxAttemptsPerTask: settings.maxAttemptsPerTask,
       skipAppOnlyTasks: settings.skipAppOnlyTasks,
       skipSurpriseTask: settings.skipSurpriseTask !== false,
-      claimed
+      claimed,
+      roundAttempts,
+      maxRoundAttempts: MAX_ROUND_ATTEMPTS,
+      failed
     });
+    for (const title of Object.keys(failed)) {
+      if (!failedBefore.has(title)) {
+        await appendLog(ctx, `Tarefa "${truncate(title, 60)}" desistida: ${failed[title]}.`);
+      }
+    }
 
     if (!next) {
       const dbg = extraction && extraction.debug ? ` Diagnóstico: ${JSON.stringify(extraction.debug)}` : '';
@@ -369,6 +462,7 @@ export async function runTasksPhase(ctx) {
 
     if (next.action === 'skip_app_only' || next.action === 'skip_surprise') {
       attempts[key] = settings.maxAttemptsPerTask; // não re-seleciona
+      if (next.title) disabledTitles.add(next.title);
       const reason =
         next.action === 'skip_surprise'
           ? 'opção — não funciona no site mobile'
@@ -390,7 +484,11 @@ export async function runTasksPhase(ctx) {
         await sleepAbortable(1500);
         continue;
       }
-      claimed.add(key);
+      claimed.add(claimKey(next));
+      // Resgate bem-sucedido libera a PRÓXIMA rodada da tarefa: zera as
+      // tentativas desta tarefa (como o resetTaskAttempt do ali-coins) para
+      // que as rodadas seguintes possam ser executadas no mesmo run.
+      resetTaskTracking({ attempts, roundAttempts, failed }, next);
       actions += 1;
       stats.tasks.push({ title: next.title, kind: 'claim', result: 'claimed' });
       await appendLog(ctx, `Resgate solicitado: ${truncate(next.title, 60)}.`);
@@ -400,12 +498,30 @@ export async function runTasksPhase(ctx) {
 
     // action === 'run'
     await updatePhase(PHASE.TASKS, `Tarefa: ${truncate(next.title, 48)} (${next.kind})`);
+
+    // Tentativas contadas ANTES da execução (terminação garantida: a tarefa é
+    // excluída após os caps mesmo se o botão sumir ou um comando falhar) —
+    // igual ao recordTaskAttempt/recordRoundAttempt do ali-coins.
+    attempts[key] = (attempts[key] || 0) + 1;
+    const roundKey = roundKeyOf(next);
+    roundAttempts[roundKey] = (roundAttempts[roundKey] || 0) + 1;
+
     const clickedTask = await safeTaskCmd(ctx, CMD.CLICK_TASK, {
       index: next.index,
       title: next.title
     });
     if (clickedTask === null) {
       await sleepAbortable(1500);
+      continue;
+    }
+    if (clickedTask.clicked === false) {
+      // A lista pode ter re-renderizado e o botão não foi localizado: a
+      // tentativa já está contada — evita "rodada fantasma" sem clique.
+      await appendLog(
+        ctx,
+        `O botão da tarefa "${truncate(next.title, 60)}" não foi encontrado na gaveta — tentativa contada.`
+      );
+      await sleepAbortable(800);
       continue;
     }
     const navigated = await waitPossibleNavigation(ctx, 5000);
@@ -416,7 +532,6 @@ export async function runTasksPhase(ctx) {
     // tentativa sem derrubar a execução.
     const currentUrl = navigated ? await getTabUrl(ctx.tabId) : '';
     if (navigated && currentUrl && !isAliexpressUrl(currentUrl)) {
-      attempts[key] = (attempts[key] || 0) + 1;
       actions += 1;
       stats.tasks.push({ title: next.title, kind: next.kind, result: 'error' });
       await appendLog(
@@ -452,9 +567,8 @@ export async function runTasksPhase(ctx) {
           'action'
         );
         if (actionRes === null) {
-          // Página sem content script: conta a tentativa e segue (a central já
-          // foi reaberta pela recuperação).
-          attempts[key] = (attempts[key] || 0) + 1;
+          // Página sem content script: a tentativa já foi contada; segue (a
+          // central já foi reaberta pela recuperação).
           actions += 1;
           stats.tasks.push({ title: next.title, kind: next.kind, result: 'error' });
           continue;
@@ -464,7 +578,6 @@ export async function runTasksPhase(ctx) {
       await restoreTaskTab(ctx).catch(() => {});
     }
 
-    attempts[key] = (attempts[key] || 0) + 1;
     actions += 1;
     stats.tasks.push({
       title: next.title,
@@ -508,12 +621,14 @@ export async function runTasksPhase(ctx) {
     const extraction = await safeTaskCommand(ctx, CMD.EXTRACT_TASKS, {}, 'tasks');
     if (extraction === null) continue;
     const tasks = (extraction && extraction.tasks) || [];
-    const claimables = tasks.filter((t) => t && t.isClaimable && !t.isDone && !claimed.has(taskKey(t)));
+    const claimables = tasks.filter(
+      (t) => t && t.isClaimable && !t.isDone && !claimed.has(claimKey(t)) && !claimed.has(taskKey(t))
+    );
     if (claimables.length === 0) break;
     for (const t of claimables.slice(0, 3)) {
       const clicked = await safeTaskCmd(ctx, CMD.CLICK_TASK, { index: t.index, title: t.title });
       if (clicked === null) break;
-      claimed.add(taskKey(t));
+      claimed.add(claimKey(t));
       stats.tasks.push({ title: t.title, kind: 'claim', result: 'claimed' });
       await appendLog(ctx, `Resgate solicitado: ${truncate(t.title, 60)}.`);
       await sleepAbortable(1200);

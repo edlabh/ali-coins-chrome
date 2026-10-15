@@ -1,10 +1,15 @@
 /**
  * Lógica pura da fila de tarefas do painel "Ganhe mais moedas".
- * Espelha a máquina de estados simplificada do ali-coins (libs/tasks/state.js):
+ * Espelha a máquina de estados do ali-coins (libs/tasks/state.js):
  *  - tarefas resgatáveis (COLLECT/+N) têm prioridade;
- *  - tarefas executáveis (GO/IR) rodam até `maxAttemptsPerTask` tentativas;
+ *  - tentativas por TÍTULO (maxAttemptsPerTask) e por RODADA
+ *    (título + statusText, cap fixo de 3 — evita insistir numa rodada travada);
+ *  - progresso observado no painel (avanço de rodada ou mudança de status)
+ *    RESETA as tentativas e reabre a tarefa — o AliExpress atualiza o
+ *    progresso com atraso e, sem isso, a rodada seguinte nunca era executada;
  *  - tarefas exclusivas do app (Prize Land, minigames, quizzes, avaliações)
- *    são puladas quando `skipAppOnlyTasks` estiver ligado.
+ *    e "Explore itens surpresa" são puladas conforme configuração (nunca
+ *    reabertas pelo progresso).
  */
 
 /**
@@ -20,14 +25,131 @@ export function taskKey(task) {
 }
 
 /**
+ * Chave da RODADA atual (título + status "n/m" exibido no card) — igual ao
+ * getRoundKey do ali-coins. Cada avanço de rodada cria uma chave nova.
+ * @param {object} task
+ * @returns {string}
+ */
+export function roundKeyOf(task) {
+  return `${taskKey(task)}:::${task?.statusText || ''}`;
+}
+
+/**
+ * Chave de um resgate pendente (título + status + rótulo do botão): evita
+ * re-clicar o MESMO resgate, mas permite novo resgate quando o estado mudar
+ * (ex.: resgate por rodada em tarefas "n/m").
+ * @param {object} task
+ * @returns {string}
+ */
+export function claimKey(task) {
+  return `${taskKey(task)}:::${task?.statusText || ''}:::${task?.btnText || ''}`;
+}
+
+/**
+ * Zera tentativas (por título e por rodada) e limpa a falha residual de uma
+ * tarefa. Usado quando o painel confirma progresso (a progressão do AliExpress
+ * chega com atraso) ou após um resgate bem-sucedido — mesma mecânica do
+ * resetTaskAttempt/resetTaskForProgress do ali-coins.
+ * @param {{attempts?: object, roundAttempts?: object, failed?: object}} state
+ * @param {object} task
+ */
+export function resetTaskTracking(state = {}, task = null) {
+  if (!task) return;
+  const key = taskKey(task);
+  if (state.attempts) state.attempts[key] = 0;
+  if (state.roundAttempts) {
+    const prefix = `${key}:::`;
+    for (const roundKey of Object.keys(state.roundAttempts)) {
+      if (roundKey.startsWith(prefix)) delete state.roundAttempts[roundKey];
+    }
+  }
+  if (state.failed && task.title && state.failed[task.title]) delete state.failed[task.title];
+}
+
+/**
+ * Aplica o progresso observado no painel (mesma mecânica do applyTaskProgress
+ * do ali-coins): avanço de `completedRounds` ou mudança de `statusText` RESETA
+ * as tentativas da tarefa e limpa falha residual — sem isso, uma tarefa marcada
+ * "sem progresso" segundos antes de a rodada avançar ficava bloqueada pelo
+ * resto da execução (ex.: "Veja super descontos" 2/3 e 3/3 nunca executavam).
+ * @param {Array<object>} tasks
+ * @param {{attempts?: object, roundAttempts?: object, progressMap?: object, statusMap?: object, failed?: object, disabled?: Set<string>|null}} state
+ * @returns {string[]} títulos que avançaram (para log)
+ */
+export function applyTaskProgress(tasks, state = {}) {
+  const { attempts, roundAttempts, progressMap, statusMap, failed, disabled } = state;
+  const advanced = [];
+  for (const t of Array.isArray(tasks) ? tasks : []) {
+    if (!t || !t.title) continue;
+    if (disabled && disabled.has(t.title)) continue;
+    let progressed = false;
+    if (Number.isFinite(t.completedRounds)) {
+      const prev =
+        progressMap && Number.isFinite(progressMap[t.title]) ? progressMap[t.title] : -1;
+      if (t.completedRounds > prev) {
+        if (prev >= 0) progressed = true;
+        if (progressMap) progressMap[t.title] = t.completedRounds;
+      }
+    }
+    if (typeof t.statusText === 'string') {
+      const prevStatus = statusMap ? statusMap[t.title] : undefined;
+      if (prevStatus !== undefined && prevStatus !== t.statusText) progressed = true;
+      if (statusMap) statusMap[t.title] = t.statusText;
+    }
+    if (progressed) {
+      resetTaskTracking({ attempts, roundAttempts, failed }, t);
+      advanced.push(t.title);
+    }
+  }
+  return advanced;
+}
+
+/**
+ * Candidatos à confirmação de progresso tardio: esgotaram as tentativas da
+ * rodada atual e ainda não falharam — antes de desistir, o chamador relê o
+ * painel após alguns segundos (mesma lista do selectLateProgressCandidates do
+ * ali-coins; o status do AliExpress costuma chegar segundos depois).
+ * @param {Array<object>} tasks
+ * @param {{roundAttempts?: object, failed?: object, disabled?: Set<string>|null, maxRoundAttempts?: number, skipAppOnlyTasks?: boolean, skipSurpriseTask?: boolean}} options
+ * @returns {Array<{title: string, key: string}>}
+ */
+export function selectLateProgressCandidates(tasks, options = {}) {
+  const {
+    roundAttempts = {},
+    failed = {},
+    disabled = null,
+    maxRoundAttempts = 3,
+    skipAppOnlyTasks = true,
+    skipSurpriseTask = true
+  } = options;
+  const out = [];
+  for (const t of Array.isArray(tasks) ? tasks : []) {
+    if (!t || t.isDone || !t.title) continue;
+    if (failed[t.title]) continue;
+    if (disabled && disabled.has(t.title)) continue;
+    const kind = t.kind || 'scroll';
+    if (kind === 'surprise' && skipSurpriseTask) continue;
+    if ((kind === 'app-only' || kind === 'prize-land') && skipAppOnlyTasks) continue;
+    const roundKey = roundKeyOf(t);
+    if ((roundAttempts[roundKey] || 0) >= maxRoundAttempts) {
+      out.push({ title: t.title, key: roundKey });
+    }
+  }
+  return out;
+}
+
+/**
  * Decide a próxima tarefa a executar.
  * @param {Array<object>} tasks lista extraída da gaveta
  * @param {Record<string, number>} attempts tentativas por chave (taskKey)
  * @param {object} options
  * @param {number} [options.maxAttemptsPerTask=3]
  * @param {boolean} [options.skipAppOnlyTasks=true]
- * @param {Set<string>} [options.claimed] chaves de claims já clicados nesta execução
- * @returns {null | (object & {action: 'claim' | 'run' | 'skip_app_only'})}
+ * @param {Set<string>} [options.claimed] chaves de claims já clicados (claimKey)
+ * @param {object} [options.roundAttempts] tentativas por rodada (roundKeyOf)
+ * @param {number} [options.maxRoundAttempts=3] cap de tentativas por rodada
+ * @param {object} [options.failed] mapa título -> motivo (mutado ao esgotar)
+ * @returns {null | (object & {action: 'claim' | 'run' | 'skip_app_only' | 'skip_surprise'})}
  */
 export function pickNextTask(tasks, attempts = {}, options = {}) {
   const maxAttempts = Number.isFinite(options.maxAttemptsPerTask)
@@ -36,24 +158,58 @@ export function pickNextTask(tasks, attempts = {}, options = {}) {
   const skipAppOnly = options.skipAppOnlyTasks !== false;
   const skipSurprise = options.skipSurpriseTask !== false;
   const claimed = options.claimed instanceof Set ? options.claimed : new Set();
+  const roundAttempts = options.roundAttempts || {};
+  const failed = options.failed || {};
+  const maxRoundAttempts = Number.isFinite(options.maxRoundAttempts)
+    ? options.maxRoundAttempts
+    : 3;
   const list = Array.isArray(tasks) ? tasks : [];
 
   // 1. Resgates pendentes (COLLECT / +N) — antes de qualquer nova navegação.
   for (const t of list) {
-    if (!t || t.isDone) continue;
-    const key = taskKey(t);
-    if (t.isClaimable && !claimed.has(key)) {
-      return { ...t, action: 'claim' };
+    if (!t || t.isDone || !t.title) continue;
+    if (failed[t.title]) continue;
+    if (t.isClaimable) {
+      // Aceita chaves novas (claimKey) e legadas (taskKey) para compatibilidade.
+      const key = claimKey(t);
+      if (!claimed.has(key) && !claimed.has(taskKey(t))) {
+        return { ...t, action: 'claim' };
+      }
     }
   }
 
-  // 2. Tarefas executáveis pendentes dentro do limite de tentativas.
+  // 2. Tarefas executáveis pendentes dentro dos limites de tentativas.
   for (const t of list) {
-    if (!t || t.isDone || !t.isActionable) continue;
+    if (!t || t.isDone || !t.title) continue;
+    if (failed[t.title]) continue;
+
+    // Cap por RODADA (título + status): sem progresso após N tentativas na
+    // mesma rodada, a tarefa falha — evita insistir numa rodada travada.
+    const roundsUsed = roundAttempts[roundKeyOf(t)] || 0;
+    if (roundsUsed >= maxRoundAttempts) {
+      failed[t.title] = failed[t.title] || `Sem progresso após ${maxRoundAttempts} tentativas na rodada`;
+      continue;
+    }
+
     const key = taskKey(t);
     const used = attempts[key] || 0;
-    if (used >= maxAttempts) continue;
+    if (used >= maxAttempts) {
+      failed[t.title] = failed[t.title] || `Limite de ${maxAttempts} tentativas atingido`;
+      continue;
+    }
+
     const kind = t.kind || 'scroll';
+
+    // Rodadas pendentes também contam como executáveis (mesmo quando o rótulo
+    // do botão não é o clássico GO/IR) — igual ao findNextPendingTask do
+    // ali-coins, exceto quando o estilo indica botão desabilitado.
+    const roundsPending =
+      Number.isFinite(t.completedRounds) &&
+      Number.isFinite(t.totalRounds) &&
+      t.completedRounds < t.totalRounds &&
+      !String(t.btnStyle || '').includes('opacity: 0.5');
+    if (!t.isActionable && !roundsPending) continue;
+
     if ((kind === 'app-only' || kind === 'prize-land') && skipAppOnly) {
       return { ...t, action: 'skip_app_only' };
     }

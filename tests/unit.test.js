@@ -12,7 +12,11 @@ import path from 'node:path';
 import { computeNextRunAt, parseTimeOfDay, formatDuration, randInt, shouldCatchUp } from '../src/common/schedule.js';
 import { statusLabel, coinsSourceLabel, fmtNumber } from '../src/common/format.js';
 import {
+  applyTaskProgress,
+  claimKey,
   pickNextTask,
+  roundKeyOf,
+  selectLateProgressCandidates,
   taskKey,
   buildReport,
   summarizeTasks,
@@ -175,8 +179,84 @@ test('pickNextTask pula "Explore itens surpresa" por padrão', () => {
 
 test('pickNextTask não repete resgates já clicados', () => {
   const t = task({ title: 'Resgatar', isActionable: false, isClaimable: true });
-  const picked = pickNextTask([t], {}, { claimed: new Set([taskKey(t)]) });
+  const picked = pickNextTask([t], {}, { claimed: new Set([claimKey(t)]) });
   assert.equal(picked, null);
+});
+
+test('progresso observado (rodada nova) reseta tentativas e reabre a tarefa', () => {
+  const t1 = task({ title: 'Super descontos', statusText: '1/3', completedRounds: 1, totalRounds: 3 });
+  const state = {
+    attempts: { [taskKey(t1)]: 3 },
+    roundAttempts: { [roundKeyOf(t1)]: 3 },
+    progressMap: { 'Super descontos': 1 },
+    statusMap: { 'Super descontos': '1/3' },
+    failed: { 'Super descontos': 'Sem progresso após 3 tentativas na rodada' }
+  };
+  const t2 = task({ title: 'Super descontos', statusText: '2/3', completedRounds: 2, totalRounds: 3 });
+  const advanced = applyTaskProgress([t2], state);
+  assert.deepEqual(advanced, ['Super descontos'], 'avanço de rodada é detectado');
+  assert.equal(state.attempts[taskKey(t2)], 0, 'tentativas por título zeradas');
+  assert.equal(state.roundAttempts[roundKeyOf(t2)] || 0, 0, 'tentativas por rodada zeradas');
+  assert.equal(state.failed['Super descontos'], undefined, 'falha residual limpa (reaberta)');
+
+  // Com o estado limpo, a tarefa volta a ser elegível no mesmo run.
+  const picked = pickNextTask([t2], state.attempts, {
+    roundAttempts: state.roundAttempts,
+    failed: state.failed
+  });
+  assert.equal(picked.action, 'run');
+  assert.equal(picked.title, 'Super descontos');
+});
+
+test('pickNextTask registra falha quando a rodada esgota sem progresso', () => {
+  const t = task({ title: 'Veja super descontos', statusText: '0/3' });
+  const roundAttempts = { [roundKeyOf(t)]: 3 };
+  const failed = {};
+  const picked = pickNextTask([t], {}, { roundAttempts, maxRoundAttempts: 3, failed });
+  assert.equal(picked, null);
+  assert.match(failed['Veja super descontos'], /rodada/);
+});
+
+test('pickNextTask permite novo resgate quando o estado da tarefa muda', () => {
+  const t1 = task({
+    title: 'Resgatar',
+    isActionable: false,
+    isClaimable: true,
+    statusText: '0/2',
+    btnText: 'COLLECT'
+  });
+  const claimed = new Set([claimKey(t1)]);
+  assert.equal(pickNextTask([t1], {}, { claimed }), null, 'mesmo resgate não repete');
+
+  const t2 = task({
+    title: 'Resgatar',
+    isActionable: false,
+    isClaimable: true,
+    statusText: '1/2',
+    btnText: 'COLLECT'
+  });
+  const picked = pickNextTask([t2], {}, { claimed });
+  assert.equal(picked.action, 'claim', 'novo estado (outra rodada) permite resgatar de novo');
+});
+
+test('selectLateProgressCandidates lista rodadas esgotadas sem falha e ignora puladas', () => {
+  const travada = task({ title: 'Rodada travada', statusText: '1/3' });
+  const pulada = task({ index: 1, title: 'Merge Boss', kind: 'app-only', statusText: '0/2' });
+  const feita = task({ index: 2, title: 'Concluída', statusText: '3/3', isDone: true });
+  const roundAttempts = { [roundKeyOf(travada)]: 3, [roundKeyOf(pulada)]: 3 };
+  const out = selectLateProgressCandidates([travada, pulada, feita], {
+    roundAttempts,
+    maxRoundAttempts: 3
+  });
+  assert.deepEqual(
+    out.map((c) => c.title),
+    ['Rodada travada'],
+    'somente a rodada esgotada elegível (sem falha registrada)'
+  );
+
+  const failed = { 'Rodada travada': 'falhou' };
+  const out2 = selectLateProgressCandidates([travada], { roundAttempts, failed });
+  assert.deepEqual(out2, [], 'tarefa já marcada como falha não entra de novo');
 });
 
 test('summarizeTasks conta estados corretamente', () => {

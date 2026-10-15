@@ -397,6 +397,15 @@
       await sleep(350);
     }
 
+    // Página presa no ESQUELETO de carregamento (mesmo sintoma tratado pelo
+    // ali-coins, que recarrega a central quando o skeleton não sai): falha
+    // RÁPIDO para o background recarregar a central e tentar de novo —
+    // insistir em cliques numa página em branco só queimava tempo/tentativas
+    // e era uma das causas de "a gaveta não abre" após a primeira tarefa.
+    if (skeletonVisible() && !queryVisible(S.tasks.taskItem) && !drawerOpen()) {
+      return { ok: false, skeleton: true, debug: drawerDebug() };
+    }
+
     const clickedTargets = [];
     const failedTargets = new Set();
 
