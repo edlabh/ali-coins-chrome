@@ -310,8 +310,13 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
     await finalize(report, settings, false);
 
     // Falha (não bloqueio/parada): agenda UMA retentativa automática. O motivo
-    // 'retry' nunca retenta de novo — evita loop.
-    if (shouldScheduleRetry({ status, reason, retryOnFailure: settings.retryOnFailure })) {
+    // 'retry' nunca retenta de novo — evita loop. Login manual exigido é a
+    // exceção: o usuário foi avisado para entrar e executar novamente — uma
+    // retentativa só repetiria o erro e roubaria o foco da tela de login.
+    if (
+      !ctx.manualLoginRequired &&
+      shouldScheduleRetry({ status, reason, retryOnFailure: settings.retryOnFailure })
+    ) {
       await scheduleRetry().catch(() => {});
       await appendLog(
         ctx,

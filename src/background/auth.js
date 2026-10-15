@@ -16,7 +16,7 @@ import {
   sleepAbortable,
   updatePhase
 } from './context.js';
-import { captchaGate, manualLoginGate, twoFAGate } from './gates.js';
+import { captchaGate, requireManualLogin, twoFAGate } from './gates.js';
 
 /**
  * Garante que a sessão está autenticada SEM tentar login automático:
@@ -26,7 +26,7 @@ import { captchaGate, manualLoginGate, twoFAGate } from './gates.js';
  *   3. UI indecisa por muito tempo → prossegue como sessão existente, deixando
  *      o check-in validar (a auto-cura usa este mesmo fluxo).
  * @param {object} ctx
- * @returns {Promise<{ok: boolean, already?: boolean, assumed?: boolean, manual?: boolean}>}
+ * @returns {Promise<{ok: boolean, already?: boolean, assumed?: boolean, manualLogin?: boolean, error?: string}>}
  */
 export async function ensureAuthenticated(ctx) {
   await updatePhase(PHASE.AUTH, 'Verificando se a sessão do AliExpress já está ativa…');
@@ -58,10 +58,9 @@ export async function ensureAuthenticated(ctx) {
       return { ok: true, already: true };
     }
     if (st.state === 'needs_login') {
-      // Login manual: aguarda o usuário entrar (sem tempo máximo); o gate só
-      // retorna quando a sessão estiver ativa ou o run for cancelado.
-      await manualLoginGate(ctx);
-      return { ok: true, already: false, manual: true };
+      // Login manual: NÃO aguarda — a tela de login é trazida para frente e a
+      // execução encerra com erro acionável ("faça login e execute novamente").
+      return await requireManualLogin(ctx);
     }
     // 'pending': esqueleto do SPA ainda carregando.
     await sleepAbortable(1800);

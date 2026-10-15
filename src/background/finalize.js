@@ -79,17 +79,30 @@ export async function runFinalAccounting(ctx, checkin, initialBalanceForTasks, p
 /**
  * Fecha a janela/aba no fim do run conforme a preferência (keepWindowOpen).
  * Fechando a janela, as session rules da aba são descartadas junto.
+ * Exceção: quando o login manual foi solicitado (ctx.manualLoginRequired), a
+ * tela de login é SEMPRE preservada — o usuário precisa entrar nela e executar
+ * a extensão novamente.
  */
 export async function applyWindowPolicy(ctx, settings) {
   if (!ctx.windowId) return;
   if (ctx.tabId) await detachCdp(ctx.tabId).catch(() => {});
 
+  const keepOpen = Boolean(settings.keepWindowOpen || ctx.manualLoginRequired);
+  if (ctx.manualLoginRequired && !settings.keepWindowOpen) {
+    await appendLog(
+      ctx,
+      'Tela de login mantida aberta — faça login no AliExpress e execute a extensão novamente.'
+    );
+  }
+
   // Modo silencioso: a aba vive em uma janela normal do usuário — NUNCA fechar
   // a janela dele; no máximo a própria aba de execução (e uma janela popup
   // vazia, caso a aba tenha sido reaproveitada de uma abertura manual).
   if (settings.silentMode) {
-    if (settings.keepWindowOpen) {
-      await appendLog(ctx, 'Modo silencioso: aba de execução mantida aberta (configuração).');
+    if (keepOpen) {
+      if (!ctx.manualLoginRequired) {
+        await appendLog(ctx, 'Modo silencioso: aba de execução mantida aberta (configuração).');
+      }
     } else if (ctx.tabId) {
       await appendLog(ctx, 'Concluído — fechando a aba de execução (modo silencioso).');
       const tabInfo = await chrome.tabs.get(ctx.tabId).catch(() => null);
@@ -110,8 +123,10 @@ export async function applyWindowPolicy(ctx, settings) {
     return;
   }
 
-  if (settings.keepWindowOpen) {
-    await appendLog(ctx, 'Janela mobile mantida aberta (configuração).');
+  if (keepOpen) {
+    if (!ctx.manualLoginRequired) {
+      await appendLog(ctx, 'Janela mobile mantida aberta (configuração).');
+    }
     await closeLedgerTab();
     return;
   }
@@ -171,6 +186,13 @@ export function describeReport(report) {
   else if (c && c.already) parts.push('sem tarefas novas');
   if (report.gained !== null) parts.push(`saldo ${report.gained >= 0 ? '+' : ''}${report.gained}`);
   parts.push(`duração ${formatDuration(report.durationMs)}`);
-  if (report.status !== RUN_STATUS.SUCCESS) parts.push(`status: ${report.status}`);
+  if (report.status !== RUN_STATUS.SUCCESS) {
+    parts.push(`status: ${report.status}`);
+    // Inclui o primeiro erro (ex.: "Login manual necessário…") para a notificação
+    // final e o popup serem acionáveis em vez de só "status: error".
+    if (Array.isArray(report.errors) && report.errors.length > 0) {
+      parts.push(String(report.errors[0]).slice(0, 140));
+    }
+  }
   return parts.join(' • ');
 }

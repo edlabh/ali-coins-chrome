@@ -23,6 +23,8 @@ import {
 import { sendCmd, isNoContentScriptError } from '../src/background/context.js';
 import { getRunState, patchRunState, saveSettings as saveSettingsStorage } from '../src/background/storage.js';
 import { ensureCoinPage, isCoinUrl } from '../src/background/tabs.js';
+import { ensureAuthenticated } from '../src/background/auth.js';
+import { applyWindowPolicy } from '../src/background/finalize.js';
 import {
   coinsFromStreak,
   streakFromCoins,
@@ -595,6 +597,135 @@ test('tabs: ensureCoinPage volta à central a partir de subpáginas coin-index (
     assert.equal(updates.length, 1, 'deve navegar de volta à central');
     assert.equal(updates[0].tabId, 9);
     assert.match(updates[0].props.url, /\/p\/coin-index\/index\.html\?/);
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+  }
+});
+
+test('auth: sessão expirada encerra com erro acionável e traz a tela de login (sem aguardar)', async () => {
+  const originalChrome = globalThis.chrome;
+  let sessionData = {};
+  const focusCalls = { windows: [], tabs: [] };
+  const notifications = [];
+  globalThis.chrome = {
+    storage: {
+      session: {
+        get: async (key) => ({ [key]: sessionData[key] }),
+        set: async (obj) => {
+          sessionData = { ...sessionData, ...obj };
+        },
+        remove: async (key) => {
+          delete sessionData[key];
+        }
+      }
+    },
+    tabs: {
+      sendMessage: async () => ({ state: 'needs_login' }),
+      update: async (tabId, props) => {
+        focusCalls.tabs.push({ tabId, props });
+        return {};
+      }
+    },
+    windows: {
+      update: async (windowId, props) => {
+        focusCalls.windows.push({ windowId, props });
+        return {};
+      }
+    },
+    runtime: { getURL: (p) => `chrome-extension://fake/${p}` },
+    notifications: {
+      create: async (id, opts) => {
+        notifications.push({ id, opts });
+        return id;
+      }
+    }
+  };
+  try {
+    const ctx = {
+      runId: 'run-manual-login',
+      tabId: 9,
+      windowId: 5,
+      settings: { silentMode: true },
+      stats: { captchaEvents: 0 },
+      log: []
+    };
+    const res = await ensureAuthenticated(ctx);
+    assert.equal(res.ok, false, 'login manual NÃO aguarda: encerra com erro');
+    assert.equal(res.manualLogin, true);
+    assert.match(res.error, /execute a extensão novamente/);
+    assert.equal(
+      ctx.manualLoginRequired,
+      true,
+      'a política de janela deve preservar a tela de login'
+    );
+    assert.ok(
+      focusCalls.tabs.some((c) => c.tabId === 9 && c.props.active === true),
+      'a aba da tela de login deve ser ativada'
+    );
+    assert.ok(
+      focusCalls.windows.some((c) => c.windowId === 5 && c.props.focused === true),
+      'a janela deve ser trazida para frente'
+    );
+    assert.ok(
+      notifications.some(
+        (n) => n.id === 'ali-coins-manual-login' && n.opts.requireInteraction === true
+      ),
+      'notificação "login manual necessário" com requireInteraction'
+    );
+    assert.ok(
+      ctx.log.some((l) => /Login manual necessário/.test(l.msg)),
+      'o erro acionável deve constar no extrato do run'
+    );
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+  }
+});
+
+test('finalize: applyWindowPolicy preserva a tela de login quando o login manual foi exigido', async () => {
+  const originalChrome = globalThis.chrome;
+  let sessionData = {};
+  const removedTabs = [];
+  const removedWindows = [];
+  globalThis.chrome = {
+    storage: {
+      session: {
+        get: async (key) => ({ [key]: sessionData[key] }),
+        set: async (obj) => {
+          sessionData = { ...sessionData, ...obj };
+        },
+        remove: async (key) => {
+          delete sessionData[key];
+        }
+      }
+    },
+    tabs: {
+      get: async () => ({ id: 9, windowId: 5, status: 'complete' }),
+      remove: async (tabId) => {
+        removedTabs.push(tabId);
+      }
+    },
+    windows: {
+      get: async () => ({ id: 5, type: 'normal' }),
+      remove: async (windowId) => {
+        removedWindows.push(windowId);
+      }
+    },
+    declarativeNetRequest: { updateSessionRules: async () => {} },
+    debugger: { detach: async () => {} }
+  };
+  try {
+    // Modo silencioso + keepWindowOpen desligado: o padrão FECHARIA a aba — com
+    // login manual exigido, a tela de login precisa sobreviver ao fim do run.
+    const ctx = { tabId: 9, windowId: 5, manualLoginRequired: true, log: [] };
+    await applyWindowPolicy(ctx, { silentMode: true, keepWindowOpen: false });
+    assert.equal(removedTabs.length, 0, 'a aba da tela de login NÃO pode ser fechada');
+    assert.equal(removedWindows.length, 0, 'a janela do usuário NÃO pode ser fechada');
+    assert.ok(
+      ctx.log.some((l) => /Tela de login mantida aberta/.test(l.msg)),
+      'o relatório deve explicar que a tela ficou aberta para o login'
+    );
   } finally {
     if (originalChrome === undefined) delete globalThis.chrome;
     else globalThis.chrome = originalChrome;

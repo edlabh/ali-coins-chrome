@@ -145,11 +145,11 @@ export const CAPTCHA_NOTIFICATION = {
     'Resolva a verificação de segurança na janela aberta. A automação continua automaticamente após a resolução.'
 };
 
-/** Mensagem padrão exibida quando a sessão caiu e o login manual é necessário. */
+/** Mensagem padrão exibida quando a sessão expirou e o login manual é necessário. */
 export const MANUAL_LOGIN_NOTIFICATION = {
   title: 'Ali Coins: login manual necessário',
   message:
-    'Entre no AliExpress (na janela aberta ou em qualquer aba do navegador). A automação continua automaticamente após o login.'
+    'O AliExpress não está logado. Faça login na tela aberta e execute a extensão novamente.'
 };
 
 export function pickDevice(settings) {

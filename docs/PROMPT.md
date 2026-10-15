@@ -1,9 +1,10 @@
 # Prompt gerado (skill: prompt-engineer)
 
-> **Nota (a partir da v0.4.0):** este é o prompt original de implementação (histórico).
+> **Nota (a partir da v0.4.x):** este é o prompt original de implementação (histórico).
 > Alguns comportamentos evoluíram depois dele: o **login agora é 100% manual** (as
 > credenciais saíram das Opções — o item "Credenciais" do prompt perdeu efeito),
-> captcha/2FA/login aguardam o usuário **sem tempo máximo** e o bloqueio anti-bot
+> captcha/2FA aguardam o usuário **sem tempo máximo** (sessão expirada encerra a
+> execução com erro acionável — faça login e execute novamente) e o bloqueio anti-bot
 > (RGV587) **não aplica mais cooldown** — a execução apenas encerra por precaução.
 > O restante do documento continua válido como referência de paridade com o ali-coins.
 

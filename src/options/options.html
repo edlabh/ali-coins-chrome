@@ -86,10 +86,13 @@
         extensão abrir) e a automação reutiliza a sessão do seu perfil — nenhuma credencial é pedida ou guardada.
       </p>
       <p class="muted small">
-        Quando um captcha, 2FA ou login for necessário, a janela/aba é trazida para frente junto com uma
-        notificação. Resolva na hora e a automação prossegue sozinha — não há tempo máximo de espera (use o
-        botão <strong>Parar</strong> no popup se quiser cancelar). Bloqueios anti-bot (RGV587) encerram a execução
-        por precaução, sem pausar as próximas: você decide quando rodar de novo.
+        Quando um captcha ou 2FA for necessário, a janela/aba é trazida para frente junto com uma
+        notificação. Resolva na hora e a automação prossegue sozinha — não há tempo máximo de espera
+        (use o botão <strong>Parar</strong> no popup se quiser cancelar). Se a sessão do AliExpress
+        expirar, a execução <strong>termina com erro</strong>: a tela de login é trazida para frente e
+        uma notificação avisa para <strong>fazer login e executar a extensão novamente</strong> (a tela
+        fica aberta para você entrar). Bloqueios anti-bot (RGV587) também encerram a execução por
+        precaução, sem pausar as próximas: você decide quando rodar de novo.
       </p>
     </section>
 

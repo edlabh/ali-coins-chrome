@@ -10,7 +10,6 @@ import {
   appendLog,
   cmd,
   isStopRequestedNow,
-  sleepAbortable,
   updatePhase
 } from './context.js';
 import { focusWindow, restoreBackgroundFocus } from './tabs.js';
@@ -77,39 +76,22 @@ export async function twoFAGate(ctx) {
 }
 
 /**
- * Valor do cookie de sessão do AliExpress (login_aliyunid_ticket), ou null.
- * Serve para detectar login feito em OUTRA aba do navegador: os cookies são do
- * perfil, então a sessão muda mesmo que a aba do run ainda mostre o formulário.
- * Sem a permissão `cookies` (ou erro), retorna null e o DOM é o único sinal.
- * @returns {Promise<string|null>}
+ * Login manual obrigatório: a extensão NÃO aguarda o login. Registra o erro
+ * acionável, traz a tela de login para o primeiro plano, notifica e encerra a
+ * execução — o usuário entra no AliExpress e executa a extensão novamente.
+ * Marca `ctx.manualLoginRequired` para a política de janela PRESERVAR a tela
+ * de login ao fim do run (ela seria fechada junto com a aba/janela normal).
+ * @param {object} ctx
+ * @returns {Promise<{ok: false, manualLogin: true, error: string}>}
  */
-async function loginTicket() {
-  try {
-    const cookie = await chrome.cookies.get({
-      url: 'https://www.aliexpress.com/',
-      name: 'login_aliyunid_ticket'
-    });
-    return cookie && cookie.value ? cookie.value : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Gate de login MANUAL: não há mais login por credenciais. Traz a janela/aba
- * do AliExpress para frente, avisa por notificação + relatório e aguarda o
- * usuário entrar (na própria aba ou em qualquer aba do navegador — a sessão é
- * do perfil). A automação continua sozinha após o login. Captcha/2FA que
- * aparecerem no meio do login são tratados pelos gates correspondentes.
- */
-export async function manualLoginGate(ctx) {
-  await updatePhase(PHASE.AUTH, 'Login manual necessário: entre no AliExpress na janela aberta…');
-  await appendLog(
-    ctx,
-    '⚠ Login manual necessário: faça login no AliExpress (na janela aberta ou em qualquer aba do navegador). A automação continua automaticamente após o login.'
-  );
+export async function requireManualLogin(ctx) {
+  const message =
+    'Login manual necessário: o AliExpress não está logado. Faça login na tela trazida para frente e execute a extensão novamente.';
+  ctx.manualLoginRequired = true;
+  await updatePhase(PHASE.AUTH, 'Login manual necessário — faça login e execute novamente.');
+  await appendLog(ctx, `⚠ ${message}`);
   if (ctx.settings.silentMode) {
-    await appendLog(ctx, 'Modo silencioso: trazendo a aba de execução para frente para você fazer o login.');
+    await appendLog(ctx, 'Modo silencioso: trazendo a tela de login para frente.');
   }
   await focusWindow(ctx.windowId, ctx.tabId);
   await notify(ctx.settings, {
@@ -118,56 +100,7 @@ export async function manualLoginGate(ctx) {
     message: MANUAL_LOGIN_NOTIFICATION.message,
     requireInteraction: true
   });
-
-  // Linha de base do cookie: só conta como "login detectado" quando o ticket
-  // APARECE ou MUDA de valor durante o gate (um ticket antigo/stale não pode
-  // liberar a automação — nesse caso o DOM da aba continua sendo a verdade).
-  const ticketAtStart = await loginTicket();
-
-  for (;;) {
-    if (await isStopRequestedNow()) throw new RunAbortedError();
-    let st;
-    try {
-      st = await cmd(ctx, CMD.CHECK_AUTH, {}, { retries: 2 });
-    } catch {
-      // Página em transição (login navegou/pendente): aguarda e repete.
-      await sleepAbortable(3000);
-      continue;
-    }
-    await patchRunState({}).catch(() => {}); // heartbeat anti-stale
-    if (st.state === 'logged_in') {
-      await appendLog(ctx, 'Login manual concluído — retomando a automação.');
-      if (ctx.settings.silentMode) {
-        await restoreBackgroundFocus(ctx.windowId, ctx.tabId, ctx.userTabId);
-      }
-      return;
-    }
-    if (st.state === 'captcha') {
-      await captchaGate(ctx, 'login-manual');
-      continue;
-    }
-    if (st.state === 'two_fa') {
-      await twoFAGate(ctx);
-      continue;
-    }
-
-    // Login pode ter sido feito em OUTRA aba (cookie do perfil mudou) enquanto
-    // esta aba ainda mostra o formulário: a central será recarregada depois.
-    const ticketNow = await loginTicket();
-    if (ticketNow && (ticketAtStart === null || ticketNow !== ticketAtStart)) {
-      await appendLog(
-        ctx,
-        'Login detectado no navegador (sessão atualizada) — recarregando a central de moedas.'
-      );
-      if (ctx.settings.silentMode) {
-        await restoreBackgroundFocus(ctx.windowId, ctx.tabId, ctx.userTabId);
-      }
-      return;
-    }
-
-    // 'needs_login'/'pending': continua aguardando o login do usuário.
-    await sleepAbortable(3000);
-  }
+  return { ok: false, manualLogin: true, error: message };
 }
 
 /**
