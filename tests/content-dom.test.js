@@ -290,6 +290,8 @@ test('AÇÕES: readMycoin lê o extrato composto da página mycoin', async () =>
 });
 
 test('AÇÕES: listFeedCards encontra os cards reais do feed (exclui subpartes e wrappers)', () => {
+  // Sem `.feeds-discount-card` no DOM: cai no caminho amplo (layouts mobile
+  // legados) e ainda exclui subpartes/wrappers.
   const env = createContentEnv(`
     <div class="aecoin-feedlist-card-wrapper">
       <div class="aecoin-feedlist-card-sSnlv" data-item-id="card-a">
@@ -298,10 +300,58 @@ test('AÇÕES: listFeedCards encontra os cards reais do feed (exclui subpartes e
       </div>
       <div class="aecoin-feedlist-card-sSnlv" data-item-id="card-b"><a href="/item/2">x</a></div>
     </div>
-    <div class="feeds-discount-card" data-item-id="card-c"></div>
+    <div class="aecoin-feedlist-card-sSnlv" data-item-id="card-c"></div>
   `);
   const sigs = env.AC.actions.listFeedCards();
   assert.deepEqual([...sigs], ['card-a', 'card-b', 'card-c']);
+});
+
+test('AÇÕES: clickTask coleta os window.open do clique (registro do MAIN world)', async () => {
+  const env = createContentEnv(`
+    <div class="e2e_normal_task">
+      <div class="e2e_normal_task_content_title">Ofertas</div>
+      <div class="e2e_normal_task_right">
+        <button class="e2e_normal_task_right_btn">GO</button>
+      </div>
+    </div>
+  `);
+  const { window } = env;
+  // Registro antigo (stale): precisa ser limpo antes do clique.
+  window.sessionStorage.setItem(
+    'ac_win_opens',
+    JSON.stringify([{ t: 0, url: 'https://stale.example/', blocked: false }])
+  );
+  env.setSendMessageHandler(async (msg) => {
+    if (msg && msg.type === 'TRUSTED_CLICK') {
+      // Simula o MAIN world registrando o window.open durante o clique.
+      window.sessionStorage.setItem(
+        'ac_win_opens',
+        JSON.stringify([
+          { t: Date.now(), url: 'https://m.aliexpress.com/x?from=mission&idem_id=1', blocked: true }
+        ])
+      );
+    }
+    return { ok: true };
+  });
+
+  const res = await env.AC.actions.clickTask({ index: 0, title: 'Ofertas' });
+  assert.equal(res.clicked, true);
+  assert.equal(res.windowOpens.length, 1, 'coleta apenas o registro do clique (stale limpo)');
+  assert.equal(res.windowOpens[0].blocked, true);
+});
+
+test('AÇÕES: feed de surpresas prioriza .feeds-discount-card (paridade com a referência)', async () => {
+  const env = createContentEnv(`
+    <div class="aecoin-feedlist-card-x" data-item-id="game-banner"></div>
+    <div class="feeds-discount-card" data-item-id="item-1"></div>
+    <div class="feeds-discount-card" data-item-id="item-2"></div>
+  `);
+  const sigs = env.AC.actions.listFeedCards();
+  assert.deepEqual(
+    [...sigs],
+    ['item-1', 'item-2'],
+    'quando existem cards do feed, banners/promos são ignorados'
+  );
 });
 
 test('AÇÕES: hit-test — alvo coberto usa clique sintético; alvo livre usa clique confiável', async () => {

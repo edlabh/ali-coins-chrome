@@ -520,6 +520,41 @@ test('main-world spoofa navigator apenas na aba de execução', () => {
   });
 });
 
+test('main-world registra window.open ({url, blocked}) no sessionStorage da aba de execução', () => {
+  const code = readFileSync(path.join(root, 'src/content/main-world.js'), 'utf8');
+  const store = new Map();
+  const sandbox = {
+    console,
+    open(url) {
+      return url && url.includes('blocked') ? null : { window: true };
+    },
+    sessionStorage: {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, v)
+    }
+  };
+  sandbox.self = sandbox;
+  sandbox.location = { hash: '' };
+  vm.createContext(sandbox);
+  vm.runInContext('var navigator = {};', sandbox);
+  vm.runInContext(code, sandbox, { filename: 'main-world.js' });
+
+  // Fora da aba de execução: NADA é registrado (usuário não é afetado).
+  sandbox.self.open('https://example.com/x');
+  assert.equal(store.has('ac_win_opens'), false);
+
+  // Na aba de execução: registra {url, blocked} de cada open.
+  sandbox.sessionStorage.setItem('ac_run', '1');
+  sandbox.self.open('https://m.aliexpress.com/p/coin-index/feeds.html?from=mission&idem_id=1');
+  sandbox.self.open('https://blocked.example/');
+  const list = JSON.parse(store.get('ac_win_opens'));
+  assert.equal(list.length, 2);
+  assert.equal(list[0].blocked, false);
+  assert.match(list[0].url, /from=mission/);
+  assert.match(list[1].url, /blocked\.example/);
+  assert.equal(list[1].blocked, true, 'open bloqueado (retorno nulo) é marcado');
+});
+
 test('storage: saveSettings descarta campos legados (credenciais/cooldown) e mantém o resto', async () => {
   const originalChrome = globalThis.chrome;
   let localData = {};

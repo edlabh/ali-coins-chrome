@@ -575,8 +575,24 @@
     const btn = row.querySelector(S.tasks.taskBtn) || row.querySelector(S.tasks.taskRight);
     if (!btn) return { clicked: false };
     const btnText = (btn.innerText || '').trim();
+    // Diagnóstico/recovery de popup: limpa o registro e coleta os window.open
+    // disparados pelo clique (o MAIN world grava {url, blocked} no
+    // sessionStorage — o tasks-phase usa para recuperar popup bloqueado).
+    try {
+      sessionStorage.removeItem('ac_win_opens');
+    } catch {
+      /* ignora */
+    }
     const ok = await smartClick(btn);
-    return { clicked: Boolean(ok), btnText };
+    let windowOpens = [];
+    try {
+      const raw = sessionStorage.getItem('ac_win_opens');
+      const parsed = raw ? JSON.parse(raw) : [];
+      windowOpens = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      // mantém [] (sem registro disponível)
+    }
+    return { clicked: Boolean(ok), btnText, windowOpens };
   }
 
   // ---------------------------------------------------------------------------
@@ -602,6 +618,19 @@
    * apenas o card mais interno de cada item (evita wrapper com vários cards).
    */
   function feedCardCandidates() {
+    // Paridade com a REFERÊNCIA: o feed de itens da missão usa
+    // `.feeds-discount-card` (é o seletor que o ali-coins clica via
+    // card.click()). Quando existirem, usamos SOMENTE eles — a lista ampla
+    // também casava banners de jogos (Merge Boss/Game Center/Farm) que abrem
+    // páginas sem crédito de missão.
+    try {
+      const strict = Array.from(document.querySelectorAll('.feeds-discount-card')).filter((el) =>
+        AC.dom.isVisible(el)
+      );
+      if (strict.length > 0) return strict;
+    } catch {
+      // seletor indisponível: cai na lista ampla (layouts legados/mobile)
+    }
     let els;
     try {
       els = Array.from(document.querySelectorAll(S.tasks.productCard));

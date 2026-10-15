@@ -72,6 +72,41 @@
     return false;
   }
 
+  // ── Observador de window.open (somente leitura) ─────────────────────────────
+  // A referência lança o Chromium com --disable-popup-blocking; no Chrome real
+  // do usuário, um window.open fora de gesto (ou tardio no handler) é BLOQUEADO
+  // e a página da missão nunca abre. Este hook NÃO intercepta: chama o `open`
+  // original e registra {url, blocked} no sessionStorage (compartilhado com o
+  // content script) — o background usa para (a) diagnosticar e (b) navegar a
+  // aba de execução para a URL bloqueada (recuperação no tasks-phase).
+  try {
+    const origOpen = typeof self.open === 'function' ? self.open : null;
+    if (origOpen) {
+      self.open = function (url, _target, _features) {
+        let res = null;
+        try {
+          res = origOpen.apply(self, arguments);
+        } catch (err) {
+          // mantém null (equivalente a bloqueado)
+        }
+        try {
+          if (isRunTab()) {
+            const entry = { t: Date.now(), url: String(url || '').slice(0, 220), blocked: !res };
+            const prev = JSON.parse(self.sessionStorage.getItem('ac_win_opens') || '[]');
+            const list = Array.isArray(prev) ? prev.slice(-4) : [];
+            list.push(entry);
+            self.sessionStorage.setItem('ac_win_opens', JSON.stringify(list));
+          }
+        } catch (err) {
+          /* sessionStorage indisponível */
+        }
+        return res;
+      };
+    }
+  } catch (err) {
+    /* window.open não configurável */
+  }
+
   let proto = null;
   try {
     proto = Object.getPrototypeOf(navigator);

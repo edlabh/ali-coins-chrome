@@ -102,11 +102,25 @@ async function adoptTaskTab(ctx) {
   // a rodada era queimada sem nenhum toque).
   let candidate = null;
   for (let attempt = 0; attempt < 6 && !candidate; attempt += 1) {
-    const tabs = await chrome.tabs.query({ windowId: ctx.windowId }).catch(() => []);
+    // A aba da tarefa pode nascer em OUTRA janela (popup com features): além
+    // da janela do run, olha todas as janelas priorizando as abas cujo opener
+    // é a aba de execução (paridade com o context.on('page') da referência).
+    const windowTabs = await chrome.tabs.query({ windowId: ctx.windowId }).catch(() => []);
+    const allTabs = await chrome.tabs.query({}).catch(() => []);
+    const seen = new Set();
+    const tabs = [];
+    for (const t of [
+      ...allTabs.filter((x) => x && x.openerTabId === ctx.tabId),
+      ...windowTabs,
+      ...allTabs
+    ]) {
+      if (!t || !t.id || seen.has(t.id)) continue;
+      seen.add(t.id);
+      tabs.push(t);
+    }
     candidate =
       tabs.find(
         (t) =>
-          t.id &&
           t.id !== ctx.tabId &&
           t.id !== runState?.ledgerTabId &&
           !known.has(t.id) &&
@@ -221,9 +235,13 @@ async function runSurpriseTaps(ctx) {
         Array.isArray(res.debug.links) && res.debug.links.length
           ? ` links: ${res.debug.links.map((l) => truncate(l, 70)).join(' | ')}`
           : '';
+      const classes =
+        Array.isArray(res.debug.samples) && res.debug.samples.length
+          ? ` classes: ${res.debug.samples.join(' | ')}`
+          : '';
       await appendLog(
         ctx,
-        `Feed de surpresas: ${res.debug.raw} card(s) no DOM (${res.debug.visible} visíveis, .feeds-discount-card=${res.debug.discount ?? '?'}).${links}`
+        `Feed de surpresas: ${res.debug.raw} card(s) no DOM (${res.debug.visible} visíveis, .feeds-discount-card=${res.debug.discount ?? '?'}).${links}${classes}`
       );
     }
 
@@ -606,7 +624,22 @@ export async function runTasksPhase(ctx) {
       await sleepAbortable(800);
       continue;
     }
-    const navigated = await waitPossibleNavigation(ctx, 5000);
+    // Popup BLOQUEADO pelo Chrome: a referência roda com --disable-popup-blocking,
+    // então um window.open do site sempre abre; no Chrome do usuário pode ser
+    // bloqueado (gesto expirado/tardio) e a página da missão nunca aparece.
+    // Recuperação fiel: navega a PRÓPRIA aba de execução para a URL pretendida.
+    const blockedOpen = (Array.isArray(clickedTask.windowOpens) ? clickedTask.windowOpens : []).find(
+      (o) => o && o.blocked && isAliexpressUrl(o.url || '')
+    );
+    let navigated = await waitPossibleNavigation(ctx, 5000);
+    if (!navigated && blockedOpen) {
+      await appendLog(
+        ctx,
+        `window.open foi bloqueado pelo Chrome (${truncate(blockedOpen.url, 80)}) — abrindo na aba de execução.`
+      );
+      await navigateTab(ctx.tabId, blockedOpen.url, 30000).catch(() => {});
+      navigated = true;
+    }
 
     // A tarefa pode abrir uma página FORA do AliExpress (webgame, loja de app,
     // link externo): sem content script ali, o comando falharia e abortaria o
@@ -640,11 +673,18 @@ export async function runTasksPhase(ctx) {
       if (next.kind === 'surprise') {
         // Surpresas: 3 toques nesta rodada, com navegação orquestrada no
         // background (o content script morre na navegação para a ficha do item).
-        // Diagnóstico: registra o resultado do GO (navegou? abriu/adotou aba?)
-        // e onde o feed da rodada está — essencial para comparar com a origem.
+        // Diagnóstico: registra o resultado do GO (navegou? abriu/adotou aba?
+        // window.open bloqueado?) e onde o feed da rodada está — essencial para
+        // comparar com a origem.
+        const opens = Array.isArray(clickedTask.windowOpens) ? clickedTask.windowOpens : [];
+        const opensTxt = opens.length
+          ? opens
+              .map((o) => `${truncate((o && o.url) || '?', 50)}${o && o.blocked ? ' [bloqueado]' : ''}`)
+              .join(' | ')
+          : 'nenhum';
         await appendLog(
           ctx,
-          `Surpresas: GO clicado — navegou: ${navigated ? 'sim' : 'não'}, aba nova adotada: ${adopted ? 'sim' : 'não'} (feed: ${truncate(await getTabUrl(ctx.tabId), 70)}).`
+          `Surpresas: GO clicado — navegou: ${navigated ? 'sim' : 'não'}, aba nova adotada: ${adopted ? 'sim' : 'não'}, window.open: ${opensTxt} (feed: ${truncate(await getTabUrl(ctx.tabId), 70)}).`
         );
         actionRes = await runSurpriseTaps(ctx);
       } else {
