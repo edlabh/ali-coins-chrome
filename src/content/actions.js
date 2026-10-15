@@ -729,7 +729,9 @@
       // os cards apontam para URLs de missão (from=mission/idem_id).
       discount: (() => {
         try {
-          return document.querySelectorAll('.feeds-discount-card').length;
+          return Array.from(document.querySelectorAll('.feeds-discount-card')).filter((el) =>
+            AC.dom.isVisible(el)
+          ).length;
         } catch {
           return 0;
         }

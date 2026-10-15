@@ -624,22 +624,12 @@ export async function runTasksPhase(ctx) {
       await sleepAbortable(800);
       continue;
     }
-    // Popup BLOQUEADO pelo Chrome: a referência roda com --disable-popup-blocking,
-    // então um window.open do site sempre abre; no Chrome do usuário pode ser
-    // bloqueado (gesto expirado/tardio) e a página da missão nunca aparece.
-    // Recuperação fiel: navega a PRÓPRIA aba de execução para a URL pretendida.
-    const blockedOpen = (Array.isArray(clickedTask.windowOpens) ? clickedTask.windowOpens : []).find(
-      (o) => o && o.blocked && isAliexpressUrl(o.url || '')
-    );
+    // O clique pode pedir a página da tarefa via window.open (ex.: o GO da
+    // surpresa abre `coin-index/adclick.html…`, o redirecionador de clique que
+    // leva à página de missão) — igual ao `activePage = newPageOpened ?? page`
+    // da referência. A recuperação (aba não adotada → navega a própria aba de
+    // execução) acontece logo após a tentativa de adoção, abaixo.
     let navigated = await waitPossibleNavigation(ctx, 5000);
-    if (!navigated && blockedOpen) {
-      await appendLog(
-        ctx,
-        `window.open foi bloqueado pelo Chrome (${truncate(blockedOpen.url, 80)}) — abrindo na aba de execução.`
-      );
-      await navigateTab(ctx.tabId, blockedOpen.url, 30000).catch(() => {});
-      navigated = true;
-    }
 
     // A tarefa pode abrir uma página FORA do AliExpress (webgame, loja de app,
     // link externo): sem content script ali, o comando falharia e abortaria o
@@ -666,6 +656,24 @@ export async function runTasksPhase(ctx) {
     // `activePage = newPageOpened ?? page`). Adota a aba para a rodada; ela é
     // fechada e a principal restaurada no finally.
     const adopted = await adoptTaskTab(ctx);
+
+    // Fallback de navegação (paridade `newPageOpened ?? page`): se o clique pediu
+    // uma URL via window.open (ex.: adclick.html → página da missão) e a aba NÃO
+    // foi adotada (popup perdido/bloqueado pelo Chrome real — a referência roda
+    // com --disable-popup-blocking) e a aba atual não navegou, replicamos a
+    // navegação NA PRÓPRIA aba de execução. É a página onde a ação precisa rodar
+    // para o site contabilizar a missão — sem isso, tudo rodava na central.
+    const openUrl = (Array.isArray(clickedTask.windowOpens) ? clickedTask.windowOpens : [])
+      .map((o) => (o && o.url) || '')
+      .find((u) => isAliexpressUrl(u));
+    if (!navigated && !adopted && openUrl) {
+      await appendLog(
+        ctx,
+        `window.open do clique (${truncate(openUrl, 80)}) não virou aba adotada — navegando a aba de execução para ela.`
+      );
+      await navigateTab(ctx.tabId, openUrl, 30000).catch(() => {});
+      navigated = true;
+    }
 
     const seconds = next.scrollSeconds || settings.scrollSeconds;
     let actionRes;
