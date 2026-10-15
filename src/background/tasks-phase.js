@@ -217,9 +217,13 @@ async function runSurpriseTaps(ctx) {
     if (res === null) break; // página sem content script: já voltamos à central
 
     if (i === 0 && res.debug) {
+      const links =
+        Array.isArray(res.debug.links) && res.debug.links.length
+          ? ` links: ${res.debug.links.map((l) => truncate(l, 70)).join(' | ')}`
+          : '';
       await appendLog(
         ctx,
-        `Feed de surpresas: ${res.debug.raw} card(s) no DOM (${res.debug.visible} visíveis).`
+        `Feed de surpresas: ${res.debug.raw} card(s) no DOM (${res.debug.visible} visíveis, .feeds-discount-card=${res.debug.discount ?? '?'}).${links}`
       );
     }
 
@@ -291,13 +295,14 @@ async function settleAfterSurpriseTap(ctx, beforeUrl, feedUrl) {
     graceMs: 1500
   });
   if (item && item.closed) {
-    // Diagnóstico de crédito (P2): quantos beacons de tracking a ficha disparou
-    // e qual a visibilidade real da página — confirma/derruba a hipótese de
-    // throttling da aba oculta (a referência desliga o throttling no launch).
+    // Diagnóstico de crédito (P2): URL aberta (com flag de missão), contagem de
+    // beacons de tracking e visibilidade real da página — a evidência que
+    // confirma/derruba as hipóteses sobre o crédito da missão.
     const vis = item.visibility ? `, visibilidade "${item.visibility}"` : '';
+    const mission = /[?&](from=mission|idem_id=)/i.test(item.url || '') ? 'sim' : 'não';
     await appendLog(
       ctx,
-      `Ficha do item: ${Number.isFinite(item.tracking) ? item.tracking : 0} beacon(s) de tracking${vis} (diagnóstico).`
+      `Ficha do item: ${truncate(item.url || '(sem URL)', 90)} (missão: ${mission}), ${Number.isFinite(item.tracking) ? item.tracking : 0} beacon(s)${vis} (diagnóstico).`
     );
     await sleepAbortable(600);
     return { opened: true };
@@ -627,7 +632,7 @@ export async function runTasksPhase(ctx) {
     // O clique em "GO" pode abrir a tarefa/feed numa ABA NOVA (na referência:
     // `activePage = newPageOpened ?? page`). Adota a aba para a rodada; ela é
     // fechada e a principal restaurada no finally.
-    await adoptTaskTab(ctx);
+    const adopted = await adoptTaskTab(ctx);
 
     const seconds = next.scrollSeconds || settings.scrollSeconds;
     let actionRes;
@@ -635,6 +640,12 @@ export async function runTasksPhase(ctx) {
       if (next.kind === 'surprise') {
         // Surpresas: 3 toques nesta rodada, com navegação orquestrada no
         // background (o content script morre na navegação para a ficha do item).
+        // Diagnóstico: registra o resultado do GO (navegou? abriu/adotou aba?)
+        // e onde o feed da rodada está — essencial para comparar com a origem.
+        await appendLog(
+          ctx,
+          `Surpresas: GO clicado — navegou: ${navigated ? 'sim' : 'não'}, aba nova adotada: ${adopted ? 'sim' : 'não'} (feed: ${truncate(await getTabUrl(ctx.tabId), 70)}).`
+        );
         actionRes = await runSurpriseTaps(ctx);
       } else {
         actionRes = await safeTaskCommand(

@@ -695,19 +695,33 @@
     const debug = {
       raw: allCards.length,
       visible: allCards.filter((el) => AC.dom.isVisible(el)).length,
-      samples: allCards.slice(0, 3).map((el) => String(el.className || '').slice(0, 50))
+      samples: allCards.slice(0, 3).map((el) => String(el.className || '').slice(0, 50)),
+      // Diagnóstico de seleção/URL: confirma se estamos no feed da missão e se
+      // os cards apontam para URLs de missão (from=mission/idem_id).
+      discount: (() => {
+        try {
+          return document.querySelectorAll('.feeds-discount-card').length;
+        } catch {
+          return 0;
+        }
+      })(),
+      links: allCards.slice(0, 3).map((el) => {
+        const a = el.matches && el.matches('a') ? el : el.querySelector('a');
+        return String((a && a.getAttribute('href')) || '').slice(0, 110);
+      })
     };
 
     if (!target) {
       return { clicked: false, cards: 0, debug };
     }
 
-    const link = target.matches && target.matches('a') ? target : target.querySelector('a');
-    // O site abre a ficha (nova aba ou mesma aba): o background detecta, espera
-    // os beacons de tracking e retorna à tela inicial. A assinatura volta na
-    // resposta — o background registra o card na memória do dia em clique
-    // bem-sucedido (paridade com a origem: repetição não conta progresso).
-    const ok = await smartClick(link || target);
+    // Paridade com a referência (`card.click({delay:50})`): o clique vai no
+    // CARD (centro), não num link interno — é o card que carrega o handler da
+    // missão do site (o clique dispara o registro; a abertura do item é
+    // secundária e tem o fallback de detalhe no background). O hit-test do
+    // smartClick evita que um overlay "engula" o clique; coberto, o clique
+    // sintético cai direto no card.
+    const ok = await smartClick(target);
     return { clicked: Boolean(ok), signature: sig, cards: feedCardCandidates().length, debug };
   }
 

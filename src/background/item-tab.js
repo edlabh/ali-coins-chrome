@@ -118,7 +118,7 @@ export async function consumeItemTab(
     const fresh = await chrome.tabs.get(tabId).catch(() => null);
     if (!fresh) {
       beaconWatch.delete(tabId);
-      return { closed: true, tracking: watch.tracking, sample: watch.sample };
+      return { closed: true, tracking: watch.tracking, url: '', sample: watch.sample };
     }
     url = fresh.pendingUrl || fresh.url || '';
   }
@@ -137,8 +137,10 @@ export async function consumeItemTab(
     // sem Runtime: mantém '' (extrato indicará indisponível)
   }
   beaconWatch.delete(tabId);
+  const finalTab = await chrome.tabs.get(tabId).catch(() => null);
+  const finalUrl = (finalTab && (finalTab.url || finalTab.pendingUrl)) || url || '';
   await detachCdp(tabId).catch(() => {});
   await unregisterAuxTab(tabId).catch(() => {});
   await chrome.tabs.remove(tabId).catch(() => {});
-  return { closed: true, tracking: watch.tracking, visibility, sample: watch.sample };
+  return { closed: true, tracking: watch.tracking, visibility, url: finalUrl, sample: watch.sample };
 }
