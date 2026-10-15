@@ -1,15 +1,10 @@
 /**
- * Página de opções: credenciais, agendamento, tarefas, captcha, aparelho e extrato.
+ * Página de opções: agendamento, tarefas, aparelho e extrato (login é manual —
+ * sem campos de credenciais, captcha/cooldown têm comportamento fixo).
  */
 import { DEFAULT_SETTINGS, MSG } from '../common/constants.js';
 import { statusLabel, coinsSourceLabel, fmtNumber } from '../common/format.js';
-import {
-  getSettings,
-  saveSettings,
-  clearCredentials,
-  patchRuntime,
-  getRuntime
-} from '../background/storage.js';
+import { getSettings, saveSettings, patchRuntime, getRuntime } from '../background/storage.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -114,12 +109,6 @@ function setStatus(text, kind = '') {
 
 async function load() {
   const s = await getSettings();
-  $('user').value = s.user || '';
-  $('passwordState').textContent = s.passwordEnc
-    ? 'Senha configurada (cifrada).'
-    : s.passwordPlain
-      ? '⚠ Senha legada em texto puro — informe a senha novamente e salve para cifrá-la.'
-      : 'Nenhuma senha configurada.';
 
   $('scheduleEnabled').checked = Boolean(s.scheduleEnabled);
   $('scheduleTime').value = s.scheduleTime || '09:30';
@@ -136,9 +125,6 @@ async function load() {
   $('pauseMaxS').value = Math.round((s.pauseBetweenTasksMaxMs ?? 20000) / 1000);
   $('searchQuery').value = s.searchQuery || 'fone bluetooth';
   $('scrollSeconds').value = s.scrollSeconds ?? 10;
-
-  $('captchaTimeoutMin').value = s.captchaTimeoutMin ?? 5;
-  $('riskCooldownHours').value = s.riskCooldownHours ?? 48;
 
   $('device').value = s.device || 'pixel8';
   $('customUA').value = s.customUA || '';
@@ -166,7 +152,6 @@ async function save() {
   }
 
   const patch = {
-    user: $('user').value.trim(),
     scheduleEnabled: $('scheduleEnabled').checked,
     scheduleTime: $('scheduleTime').value || '09:30',
     runOnStartup: $('runOnStartup').checked,
@@ -183,9 +168,6 @@ async function save() {
     searchQuery: $('searchQuery').value.trim() || 'fone bluetooth',
     scrollSeconds: toInt($('scrollSeconds').value, 10),
 
-    captchaTimeoutMin: toInt($('captchaTimeoutMin').value, 5),
-    riskCooldownHours: toInt($('riskCooldownHours').value, 48),
-
     device: $('device').value,
     customUA: $('customUA').value.trim(),
     customWidth: toInt($('customWidth').value, 412),
@@ -196,18 +178,11 @@ async function save() {
     notifyOnlyOnChange: $('notifyOnlyOnChange').checked
   };
 
-  const password = $('password').value;
-  if (password) patch.password = password;
-
   try {
     await saveSettings(patch);
   } catch (err) {
     setStatus(`Falha ao salvar: ${err.message}`, 'error');
     return;
-  }
-  $('password').value = '';
-  if (password) {
-    $('passwordState').textContent = 'Senha configurada (cifrada).';
   }
 
   // Reagenda o alarme diário no service worker.
@@ -229,7 +204,7 @@ function installDirtyTracking() {
       setStatus('Há alterações não salvas — clique em Salvar.', 'warn');
     };
     el.addEventListener('change', markDirty);
-    if (el.type === 'text' || el.type === 'password' || el.type === 'number') {
+    if (el.type === 'text' || el.type === 'number') {
       el.addEventListener('input', markDirty);
     }
   }
@@ -245,7 +220,6 @@ $('btnRun').addEventListener('click', async () => {
   setStatus('Iniciando execução…');
   const res = await chrome.runtime.sendMessage({ type: MSG.RUN_NOW }).catch(() => null);
   if (res && res.alreadyRunning) setStatus('Já existe uma execução em andamento.', 'error');
-  else if (res && res.blockedUntil) setStatus(`Bloqueio anti-bot ativo até ${new Date(res.blockedUntil).toLocaleString('pt-BR')}.`, 'error');
   else setStatus('Execução iniciada. Acompanhe pelo popup da extensão.', 'ok');
 });
 
@@ -256,23 +230,10 @@ $('btnOpenWindow').addEventListener('click', async () => {
   else setStatus('Falha ao abrir a janela mobile.', 'error');
 });
 
-$('btnClearCooldown').addEventListener('click', async () => {
-  await patchRuntime({ blockedUntil: null });
-  setStatus('Bloqueio anti-bot (cooldown) liberado; histórico mantido.', 'ok');
-});
-
-$('btnClearCreds').addEventListener('click', async () => {
-  await clearCredentials();
-  $('user').value = '';
-  $('password').value = '';
-  $('passwordState').textContent = 'Nenhuma senha configurada.';
-  setStatus('Credenciais removidas.', 'ok');
-});
-
 $('btnClearHistory').addEventListener('click', async () => {
-  await patchRuntime({ lastReport: null, history: [], blockedUntil: null });
+  await patchRuntime({ lastReport: null, history: [] });
   await renderHistory();
-  setStatus('Histórico e cooldown limpos.', 'ok');
+  setStatus('Histórico limpo.', 'ok');
 });
 
 $('btnRefreshHistory').addEventListener('click', () => {
@@ -282,12 +243,9 @@ $('btnRefreshHistory').addEventListener('click', () => {
 $('btnExportJson').addEventListener('click', async () => {
   try {
     const [settings, runtime] = await Promise.all([getSettings(), getRuntime()]);
-    const safeSettings = { ...settings };
-    delete safeSettings.passwordEnc;
-    delete safeSettings.passwordPlain;
     const payload = {
       exportedAt: new Date().toISOString(),
-      settings: safeSettings,
+      settings,
       runtime: {
         lastStreak: runtime.lastStreak,
         lastStreakAt: runtime.lastStreakAt,
@@ -302,7 +260,7 @@ $('btnExportJson').addEventListener('click', async () => {
     a.download = `ali-coins-backup-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    setStatus('Backup JSON exportado (sem a senha).', 'ok');
+    setStatus('Backup JSON exportado.', 'ok');
   } catch (err) {
     setStatus(`Falha ao exportar: ${err.message}`, 'error');
   }
@@ -323,11 +281,8 @@ $('fileImportJson').addEventListener('change', async (ev) => {
       throw new Error('Arquivo JSON inválido.');
     }
     if (parsed.settings && typeof parsed.settings === 'object') {
-      const safePatch = { ...parsed.settings };
-      delete safePatch.password;
-      delete safePatch.passwordEnc;
-      delete safePatch.passwordPlain;
-      await saveSettings(safePatch);
+      // saveSettings remove campos legados (credenciais/cooldown) de backups antigos.
+      await saveSettings({ ...parsed.settings });
       await chrome.runtime.sendMessage({ type: MSG.SETTINGS_CHANGED }).catch(() => {});
     }
     if (parsed.runtime && typeof parsed.runtime === 'object') {

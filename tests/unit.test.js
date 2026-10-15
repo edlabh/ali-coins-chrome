@@ -21,9 +21,8 @@ import {
   shouldScheduleRetry
 } from '../src/common/state-utils.js';
 import { sendCmd, isNoContentScriptError } from '../src/background/context.js';
-import { getRunState, patchRunState } from '../src/background/storage.js';
+import { getRunState, patchRunState, saveSettings as saveSettingsStorage } from '../src/background/storage.js';
 import { ensureCoinPage, isCoinUrl } from '../src/background/tabs.js';
-import { encryptText, decryptText } from '../src/common/crypt.js';
 import {
   coinsFromStreak,
   streakFromCoins,
@@ -205,13 +204,27 @@ test('buildReport calcula ganho de saldo e duração', () => {
 
 test('migrateSettings desliga keepWindowOpen legado e carimba a versão', () => {
   // Config antiga (padrões antigos: janela aberta, execução visível) → migra.
-  const legacy = migrateSettings({ keepWindowOpen: true, user: 'a@b.com' });
+  // v6: campos de credenciais/cooldown legados são removidos para sempre.
+  const legacy = migrateSettings({
+    keepWindowOpen: true,
+    user: 'a@b.com',
+    passwordEnc: { v: 1, iv: 'x', ct: 'y' },
+    passwordPlain: 'texto-puro',
+    cryptoOk: true,
+    captchaTimeoutMin: 5,
+    riskCooldownHours: 48
+  });
   assert.equal(legacy.changed, true);
   assert.equal(legacy.settings.keepWindowOpen, false);
   assert.equal(legacy.settings.silentMode, true, 'v3: segundo plano por padrão');
   assert.equal(legacy.settings.maxTaskActions, 60, 'v4: teto antigo de 25 sobe para 60');
   assert.equal(legacy.settings.settingsVersion, SETTINGS_VERSION);
-  assert.equal(legacy.settings.user, 'a@b.com');
+  assert.equal(legacy.settings.user, undefined, 'v6: login por credenciais removido');
+  assert.equal(legacy.settings.passwordEnc, undefined);
+  assert.equal(legacy.settings.passwordPlain, undefined);
+  assert.equal(legacy.settings.cryptoOk, undefined);
+  assert.equal(legacy.settings.captchaTimeoutMin, undefined, 'v6: sem tempo máx. de captcha');
+  assert.equal(legacy.settings.riskCooldownHours, undefined, 'v6: sem cooldown anti-bot');
 
   // Config já na versão atual: preferências do usuário são preservadas.
   const current = migrateSettings({ keepWindowOpen: true, settingsVersion: SETTINGS_VERSION });
@@ -361,7 +374,7 @@ test('content scripts carregam em ordem sem erros e expõem AC.actions', () => {
   assert.equal(typeof AC.classifyTask, 'function');
   assert.equal(typeof AC.dom.clickHuman, 'function');
   assert.equal(typeof AC.ledger.extractTodayLedger, 'function');
-  assert.equal(typeof AC.actions.doLogin, 'function');
+  assert.equal(typeof AC.actions.waitCaptcha, 'function');
   assert.equal(typeof AC.actions.checkAuth, 'function');
   assert.equal(typeof AC.actions.doCheckin, 'function');
   assert.equal(typeof AC.actions.extractTasks, 'function');
@@ -464,53 +477,46 @@ test('main-world intercepta window.open na aba de execução e navega na mesma a
   assert.equal(ret.location, sandbox.location);
 });
 
-test('crypt: encryptText e decryptText cifram e decifram com AES-256-GCM', async () => {
-  const originalIdb = globalThis.indexedDB;
-  const storeMap = new Map();
-  globalThis.indexedDB = {
-    open() {
-      const req = {};
-      queueMicrotask(() => {
-        req.result = {
-          objectStoreNames: { contains: () => true },
-          createObjectStore: () => ({}),
-          transaction: () => ({
-            objectStore: () => ({
-              get(k) {
-                const r = {};
-                queueMicrotask(() => {
-                  r.result = storeMap.get(k);
-                  if (r.onsuccess) r.onsuccess();
-                });
-                return r;
-              },
-              put(v, k) {
-                storeMap.set(k, v);
-              }
-            }),
-            set oncomplete(fn) {
-              queueMicrotask(fn);
-            }
-          }),
-          close() {}
-        };
-        if (req.onupgradeneeded) req.onupgradeneeded();
-        if (req.onsuccess) req.onsuccess();
-      });
-      return req;
+test('storage: saveSettings descarta campos legados (credenciais/cooldown) e mantém o resto', async () => {
+  const originalChrome = globalThis.chrome;
+  let localData = {};
+  globalThis.chrome = {
+    storage: {
+      local: {
+        get: async (key) => ({ [key]: localData[key] }),
+        set: async (obj) => {
+          localData = { ...localData, ...obj };
+        }
+      }
     }
   };
   try {
-    const enc = await encryptText('S3nha-Super-Secreta!');
-    assert.ok(enc && enc.v === 1 && enc.iv && enc.ct);
-    assert.notEqual(enc.ct, 'S3nha-Super-Secreta!');
-    const dec = await decryptText(enc);
-    assert.equal(dec, 'S3nha-Super-Secreta!');
-    assert.equal(await decryptText({ v: 1, iv: enc.iv, ct: 'invalido' }), null);
-    assert.equal(await encryptText(''), null);
+    const next = await saveSettingsStorage({
+      user: 'a@b.com',
+      password: 'segredo',
+      passwordEnc: { v: 1, iv: 'x', ct: 'y' },
+      passwordPlain: 'segredo',
+      cryptoOk: true,
+      captchaTimeoutMin: 5,
+      riskCooldownHours: 48,
+      scrollSeconds: 12
+    });
+    assert.equal(next.user, undefined, 'credencial legada não pode voltar');
+    assert.equal(next.password, undefined);
+    assert.equal(next.passwordEnc, undefined);
+    assert.equal(next.passwordPlain, undefined);
+    assert.equal(next.cryptoOk, undefined);
+    assert.equal(next.captchaTimeoutMin, undefined);
+    assert.equal(next.riskCooldownHours, undefined);
+    assert.equal(next.scrollSeconds, 12, 'preferências válidas são preservadas');
+    // O que foi gravado no storage também está limpo (inclusive de backups antigos).
+    assert.equal(localData.settings.user, undefined);
+    assert.equal(localData.settings.passwordEnc, undefined);
+    assert.equal(localData.settings.riskCooldownHours, undefined);
+    assert.equal(localData.settings.settingsVersion, SETTINGS_VERSION);
   } finally {
-    if (originalIdb === undefined) delete globalThis.indexedDB;
-    else globalThis.indexedDB = originalIdb;
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
   }
 });
 

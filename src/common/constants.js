@@ -39,7 +39,6 @@ export const DEVICE_PRESETS = {
 /** Tipos de mensagem: background -> content script (comando). */
 export const CMD = Object.freeze({
   CHECK_AUTH: 'CHECK_AUTH',
-  DO_LOGIN: 'DO_LOGIN',
   WAIT_CAPTCHA: 'WAIT_CAPTCHA',
   WAIT_2FA: 'WAIT_2FA',
   DO_CHECKIN: 'DO_CHECKIN',
@@ -61,8 +60,7 @@ export const MSG = Object.freeze({
   RUN_NOW: 'RUN_NOW',
   STOP_RUN: 'STOP_RUN',
   OPEN_WINDOW: 'OPEN_WINDOW',
-  SETTINGS_CHANGED: 'SETTINGS_CHANGED',
-  CLEAR_COOLDOWN: 'CLEAR_COOLDOWN'
+  SETTINGS_CHANGED: 'SETTINGS_CHANGED'
 });
 
 /** Fases visíveis do run (exibidas no popup/badge). */
@@ -93,11 +91,6 @@ export const RUN_STATUS = Object.freeze({
 
 /** Configurações padrão (espelham os defaults seguros do ali-coins). */
 export const DEFAULT_SETTINGS = Object.freeze({
-  user: '',
-  passwordEnc: null, // { v, iv, ct } — nunca armazenamos senha em texto puro quando o WebCrypto está disponível
-  passwordPlain: '', // fallback apenas se a criptografia falhar (sinalizado na UI)
-  cryptoOk: null,
-
   // Agendamento
   scheduleEnabled: false,
   scheduleTime: '09:30', // HH:MM local do navegador
@@ -123,9 +116,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   // Falha na execução agenda UMA nova tentativa automática (~45 min depois).
   retryOnFailure: true,
 
-  // Captcha
-  captchaTimeoutMin: 5,
-  riskCooldownHours: 48,
+  // Login é 100% manual: a extensão nunca pede/guarda credenciais. Quando o
+  // AliExpress não está logado, o run aguarda o login na janela aberta.
 
   // Janela / aparelho
   device: 'pixel8',
@@ -151,6 +143,13 @@ export const CAPTCHA_NOTIFICATION = {
   title: 'Ali Coins: captcha detectado',
   message:
     'Resolva a verificação de segurança na janela aberta. A automação continua automaticamente após a resolução.'
+};
+
+/** Mensagem padrão exibida quando a sessão caiu e o login manual é necessário. */
+export const MANUAL_LOGIN_NOTIFICATION = {
+  title: 'Ali Coins: login manual necessário',
+  message:
+    'Entre no AliExpress (na janela aberta ou em qualquer aba do navegador). A automação continua automaticamente após o login.'
 };
 
 export function pickDevice(settings) {

@@ -1,5 +1,12 @@
 # Prompt gerado (skill: prompt-engineer)
 
+> **Nota (a partir da v0.4.0):** este é o prompt original de implementação (histórico).
+> Alguns comportamentos evoluíram depois dele: o **login agora é 100% manual** (as
+> credenciais saíram das Opções — o item "Credenciais" do prompt perdeu efeito),
+> captcha/2FA/login aguardam o usuário **sem tempo máximo** e o bloqueio anti-bot
+> (RGV587) **não aplica mais cooldown** — a execução apenas encerra por precaução.
+> O restante do documento continua válido como referência de paridade com o ali-coins.
+
 > Este é o prompt otimizado que rege a implementação desta extensão, gerado a partir de:
 > 1. análise profunda do projeto [edlabh/ali-coins](https://github.com/edlabh/ali-coins);
 > 2. skills selecionadas do catálogo [sickn33/agentic-awesome-skills](https://github.com/sickn33/agentic-awesome-skills).

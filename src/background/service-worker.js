@@ -7,7 +7,7 @@ import { startRun, requestStop } from './runner.js';
 import { installScheduler, scheduleDaily } from './scheduler.js';
 import { focusWindow, isAliexpressUrl, prepareRunTab } from './tabs.js';
 import { clickTrusted, forgetCdp } from './cdp.js';
-import { getRunState, getRuntime, getSettings, patchRuntime, pushReport } from './storage.js';
+import { getRunState, getRuntime, getSettings, pushReport } from './storage.js';
 
 installScheduler();
 
@@ -16,14 +16,11 @@ chrome.debugger.onDetach.addListener((source) => {
   if (source && typeof source.tabId === 'number') forgetCdp(source.tabId);
 });
 
-// Clique nas notificações do sistema: leva à janela do captcha/run ou abre as Opções.
+// Clique nas notificações do sistema: leva à janela do run (captcha, 2FA ou
+// login manual). O aviso de login manual usa o mesmo fluxo.
 chrome.notifications.onClicked.addListener(async (notificationId) => {
   try {
     chrome.notifications.clear(notificationId).catch(() => {});
-    if (notificationId === 'ali-coins-missing-credentials') {
-      chrome.runtime.openOptionsPage();
-      return;
-    }
     const runState = await getRunState();
     if (runState && runState.windowId) {
       await focusWindow(runState.windowId, runState.tabId || null);
@@ -57,7 +54,13 @@ function isRunOwnedTab(tabId, tab, runState) {
 function shouldKeepSilent(runState) {
   if (!runState || !runState.active) return false;
   if (runState.silentMode === false) return false;
-  return runState.phase !== PHASE.CAPTCHA && runState.phase !== PHASE.TWO_FA;
+  // Fases que exigem o usuário (captcha, 2FA e login manual): o foco foi
+  // trazido de propósito (focusWindow) e o guarda NÃO pode devolvê-lo.
+  return (
+    runState.phase !== PHASE.CAPTCHA &&
+    runState.phase !== PHASE.TWO_FA &&
+    runState.phase !== PHASE.AUTH
+  );
 }
 
 chrome.tabs.onCreated.addListener(async (tab) => {
@@ -151,28 +154,18 @@ async function handleMessage(message, sender) {
       return {
         ok: true,
         settings: {
-          user: settings.user,
-          hasPassword: Boolean(settings.passwordEnc || settings.passwordPlain),
-          cryptoOk: settings.cryptoOk,
           scheduleEnabled: settings.scheduleEnabled,
           scheduleTime: settings.scheduleTime,
           runOnStartup: settings.runOnStartup,
           device: settings.device,
           skipAppOnlyTasks: settings.skipAppOnlyTasks,
-          keepWindowOpen: settings.keepWindowOpen,
-          captchaTimeoutMin: settings.captchaTimeoutMin
+          keepWindowOpen: settings.keepWindowOpen
         },
         runState,
         lastReport: runtime.lastReport,
         lastStreak: runtime.lastStreak,
-        nextRunAt: runtime.nextRunAt,
-        blockedUntil: runtime.blockedUntil
+        nextRunAt: runtime.nextRunAt
       };
-    }
-
-    case MSG.CLEAR_COOLDOWN: {
-      await patchRuntime({ blockedUntil: null });
-      return { ok: true };
     }
 
     case MSG.RUN_NOW: {

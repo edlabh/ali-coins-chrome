@@ -92,95 +92,9 @@
   }
 
   // ---------------------------------------------------------------------------
-  // LOGIN
+  // LOGIN — 100% manual: a extensão não preenche credenciais (o usuário entra
+  // pelo navegador; o background aguarda a sessão via CHECK_AUTH).
   // ---------------------------------------------------------------------------
-
-  function findContinueButton() {
-    return findByText([/^continue$/i, /^continuar$/i, /^next$/i, /^pr[oó]ximo$/i], {
-      tagNames: ['button'],
-      maxCandidates: 400
-    });
-  }
-
-  function findSignInButton() {
-    const explicit = queryVisible('button[type="submit"], button.cosmos-btn-primary');
-    if (explicit) return explicit;
-    return findByText([/^sign in$/i, /^entrar$/i, /^login$/i], { tagNames: ['button'], maxCandidates: 400 });
-  }
-
-  /**
-   * Executa o fluxo de login por senha (idempotente: pode ser re-chamado).
-   * @param {{user: string, password: string}} params
-   */
-  async function doLogin({ user, password }) {
-    if (captchaInfo().present) return { needsCaptcha: true };
-    if (coinUiPresent() && !loginFormState().password) {
-      return { ok: true, already: true };
-    }
-
-    // Campo de usuário (quando existir).
-    let form = loginFormState();
-    if (form.username && !form.password) {
-      await sleep(300);
-      setNativeValue(form.username, user);
-      await sleep(250);
-      if (captchaInfo().present) return { needsCaptcha: true };
-
-      // Enter primeiro; fallback para botão "Continue" de layouts em etapas.
-      pressEnter(form.username);
-      await sleep(1600);
-      if (captchaInfo().present) return { needsCaptcha: true };
-
-      form = loginFormState();
-      if (!form.password && !coinUiPresent()) {
-        const cont = findContinueButton();
-        if (cont) {
-          await smartClick(cont);
-          await waitUntil(() => loginFormState().password || coinUiPresent() || captchaInfo().present, {
-            timeout: 4000
-          });
-          if (captchaInfo().present) return { needsCaptcha: true };
-          await sleep(500);
-        }
-      }
-    }
-
-    // Campo de senha (fluxo completo ou reautenticação in-page).
-    form = loginFormState();
-    if (form.password) {
-      if (captchaInfo().present) return { needsCaptcha: true };
-      await sleep(200);
-      setNativeValue(form.password, password);
-      await sleep(250);
-      if (captchaInfo().present) return { needsCaptcha: true };
-
-      const btn = findSignInButton();
-      if (btn) await smartClick(btn);
-      else pressEnter(form.password);
-
-      const outcome = await waitUntil(
-        () => {
-          if (captchaInfo().present) return { needsCaptcha: true };
-          const now = loginFormState();
-          if (now.twoFA) return { twoFA: true };
-          if (coinUiPresent() && !now.password) return { ok: true };
-          return null;
-        },
-        { timeout: 7000, interval: 400 }
-      );
-      if (outcome) return outcome;
-      return { pending: true };
-    }
-
-    if (coinUiPresent()) return { ok: true, already: true };
-
-    // Página ainda carregando (skeleton do SPA): pede nova tentativa.
-    await waitUntil(() => loginFormState().password || loginFormState().username || coinUiPresent(), {
-      timeout: 4000
-    });
-    if (coinUiPresent()) return { ok: true, already: true };
-    return { pending: true };
-  }
 
   /**
    * Aguarda a resolução do captcha pelo usuário durante `chunkMs`.
@@ -816,7 +730,6 @@
 
   AC.actions = {
     checkAuth,
-    doLogin,
     waitCaptcha,
     wait2FA,
     doCheckin,

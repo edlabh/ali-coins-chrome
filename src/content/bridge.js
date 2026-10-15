@@ -26,8 +26,6 @@
 
         case 'CHECK_AUTH':
           return AC.actions.checkAuth();
-        case 'DO_LOGIN':
-          return await AC.actions.doLogin(payload);
         case 'WAIT_CAPTCHA':
           return await AC.actions.waitCaptcha(payload);
         case 'WAIT_2FA':

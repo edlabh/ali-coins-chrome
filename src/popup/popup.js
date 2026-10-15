@@ -34,7 +34,7 @@ function dotKind(phase, active) {
 async function refresh() {
   const data = await chrome.runtime.sendMessage({ type: MSG.GET_OVERVIEW }).catch(() => null);
   if (!data || !data.ok) return;
-  const { settings, runState, lastReport, lastStreak, nextRunAt, blockedUntil } = data;
+  const { settings, runState, lastReport, lastStreak, nextRunAt } = data;
 
   // Chips rápidos de saldo e sequência no topo
   const latestBalance =
@@ -81,23 +81,12 @@ async function refresh() {
   }
   $('statusTiming').textContent = timing.join(' • ');
 
-  $('warnCredentials').classList.toggle('hidden', Boolean(settings.user && settings.hasPassword));
-  $('warnBlocked').classList.toggle('hidden', !blockedUntil || blockedUntil < Date.now());
-  if (blockedUntil && blockedUntil > Date.now()) {
-    $('warnBlockedText').textContent = `Bloqueio anti-bot ativo. Novas tentativas liberadas após ${new Date(blockedUntil).toLocaleString('pt-BR')}. `;
-  }
-
   // Aviso de check-in já coletado (ao vivo durante o run ou no último relatório).
   const alreadyCollected =
     Boolean(runState && runState.checkin && runState.checkin.already) ||
     Boolean(lastReport && lastReport.checkin && lastReport.checkin.already);
   $('warnAlready').classList.toggle('hidden', !alreadyCollected);
-
-  const anyWarning =
-    !$('warnCredentials').classList.contains('hidden') ||
-    !$('warnAlready').classList.contains('hidden') ||
-    !$('warnBlocked').classList.contains('hidden');
-  $('warnings').classList.toggle('hidden', !anyWarning);
+  $('warnings').classList.toggle('hidden', !alreadyCollected);
 
   // Extrato ao vivo (últimas linhas do log da execução).
   const liveLog = $('liveLog');
@@ -220,11 +209,6 @@ $('btnStop').addEventListener('click', async () => {
 $('btnOptions').addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
   window.close();
-});
-
-$('btnClearCooldown').addEventListener('click', async () => {
-  await chrome.runtime.sendMessage({ type: MSG.CLEAR_COOLDOWN }).catch(() => {});
-  await refresh();
 });
 
 refresh();

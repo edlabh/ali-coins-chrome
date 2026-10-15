@@ -1,12 +1,11 @@
 /**
  * Camada de persistência do background service worker.
- *  - settings: chrome.storage.local (senha cifrada via WebCrypto quando possível)
- *  - runtime: chrome.storage.local (último relatório, histórico, próximo run, cooldown)
+ *  - settings: chrome.storage.local (sem credenciais: o login é 100% manual)
+ *  - runtime: chrome.storage.local (último relatório, histórico, próximo run)
  *  - runState: chrome.storage.session (estado vivo da execução; sobrevive a reinícios do SW)
  */
 
 import { DEFAULT_SETTINGS, RUN_HISTORY_LIMIT } from '../common/constants.js';
-import { encryptText, decryptText } from '../common/crypt.js';
 import { migrateSettings, SETTINGS_VERSION } from '../common/state-utils.js';
 
 const SETTINGS_KEY = 'settings';
@@ -28,10 +27,22 @@ export async function getSettings() {
   return merged;
 }
 
+// Campos que versões antigas gravavam e que NÃO existem mais (login por
+// credenciais, tempo máx. de captcha, cooldown anti-bot). São removidos em
+// qualquer gravação — inclusive importações de backup antigo — para nunca
+// ressuscitarem no armazenamento.
+const LEGACY_SETTINGS_KEYS = [
+  'user',
+  'password',
+  'passwordEnc',
+  'passwordPlain',
+  'cryptoOk',
+  'captchaTimeoutMin',
+  'riskCooldownHours'
+];
+
 /**
- * Salva um patch de configurações. O campo `password` (texto puro) é cifrado e
- * removido. A criptografia é OBRIGATÓRIA: se ela falhar, o salvamento é recusado
- * (nunca gravamos senha em texto puro).
+ * Salva um patch de configurações (mesclado com as atuais).
  * @param {object} patch
  * @returns {Promise<object>} settings atualizadas
  */
@@ -39,18 +50,7 @@ export async function saveSettings(patch) {
   const current = await getSettings();
   const next = { ...current, ...patch };
 
-  if (typeof patch.password === 'string' && patch.password.length > 0) {
-    const enc = await encryptText(patch.password);
-    if (!enc) {
-      throw new Error(
-        'Não foi possível cifrar a senha (WebCrypto/IndexedDB indisponível). Salvamento recusado para não gravar credenciais em texto puro.'
-      );
-    }
-    next.passwordEnc = enc;
-    next.passwordPlain = '';
-    next.cryptoOk = true;
-  }
-  delete next.password;
+  for (const key of LEGACY_SETTINGS_KEYS) delete next[key];
   next.settingsVersion = SETTINGS_VERSION;
 
   await chrome.storage.local.set({ [SETTINGS_KEY]: next });
@@ -58,31 +58,8 @@ export async function saveSettings(patch) {
 }
 
 /**
- * Recupera a senha em texto puro (apenas em memória do SW, nunca logada).
- * `passwordPlain` só é lido como compatibilidade legada (estado que não existe
- * mais em novos salvamentos, que exigem cifragem); a UI orienta a recadastrar.
- * @param {object} [settings]
- * @returns {Promise<string>}
- */
-export async function getPassword(settings) {
-  const s = settings || (await getSettings());
-  if (s.passwordEnc) {
-    const dec = await decryptText(s.passwordEnc);
-    if (dec) return dec;
-  }
-  return s.passwordPlain || '';
-}
-
-/**
- * Limpa credenciais salvas.
- */
-export async function clearCredentials() {
-  await saveSettings({ user: '', passwordEnc: null, passwordPlain: '' });
-}
-
-/**
- * Estado de runtime (relatórios, agenda, cooldown anti-bot).
- * @returns {Promise<{lastReport?: object|null, history?: object[], nextRunAt?: number|null, blockedUntil?: number|null, lastReadyAt?: number|null}>}
+ * Estado de runtime (relatórios, agenda).
+ * @returns {Promise<{lastReport?: object|null, history?: object[], nextRunAt?: number|null, lastReadyAt?: number|null}>}
  */
 export async function getRuntime() {
   const data = await chrome.storage.local.get(RUNTIME_KEY);
@@ -90,7 +67,6 @@ export async function getRuntime() {
     lastReport: null,
     history: [],
     nextRunAt: null,
-    blockedUntil: null,
     lastReadyAt: null,
     lastStreak: null,
     lastStreakAt: null,

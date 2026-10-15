@@ -19,10 +19,8 @@ import { randInt } from '../common/schedule.js';
 import { buildReport, shouldScheduleRetry } from '../common/state-utils.js';
 import {
   getRunState,
-  getRuntime,
   getSettings,
-  patchRunState,
-  patchRuntime
+  patchRunState
 } from './storage.js';
 import { applySilentEmulation, attachCdp } from './cdp.js';
 import { ensureAuthenticated } from './auth.js';
@@ -77,7 +75,7 @@ function reasonLabel(reason) {
 /**
  * Ponto de entrada do run. Não lança: sempre finaliza com relatório.
  * @param {{reason?: string, manual?: boolean}} options
- * @returns {Promise<{started: boolean, alreadyRunning?: boolean, blockedUntil?: number|null}>}
+ * @returns {Promise<{started: boolean, alreadyRunning?: boolean}>}
  */
 export async function startRun({ reason = 'manual', manual = false } = {}) {
   if (startingLock) {
@@ -88,7 +86,6 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
   let runId;
   let startedAt;
   let settings;
-  let credentialsConfigured;
   let staleUnlocked = false;
   try {
     const existing = await getRunState();
@@ -109,18 +106,7 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
       }
     }
 
-    const runtime = await getRuntime();
-    if (manual === false && runtime.blockedUntil && Date.now() < runtime.blockedUntil) {
-      return { started: false, blockedUntil: runtime.blockedUntil };
-    }
-
     settings = await getSettings();
-    // Sem credenciais salvas também é permitido: o AliExpress pode já estar
-    // logado no perfil. O login só é exigido quando a página pedir (ver auth.js),
-    // com um aviso claro pedindo para configurar as Opções.
-    credentialsConfigured = Boolean(
-      settings.user && (settings.passwordEnc || settings.passwordPlain)
-    );
 
     // Uma nova execução supersede uma retentativa automática pendente.
     await clearRetry();
@@ -163,12 +149,6 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
   await appendLog(ctx, `Execução iniciada (${reasonLabel(reason)}).`);
   if (staleUnlocked) {
     await appendLog(ctx, 'Execução anterior órfã (>15 min sem atividade) foi destravada.');
-  }
-  if (!credentialsConfigured) {
-    await appendLog(
-      ctx,
-      'Sem credenciais salvas — executando com a sessão existente do AliExpress (o login será solicitado apenas se a sessão estiver inválida).'
-    );
   }
 
   let status = RUN_STATUS.SUCCESS;
@@ -310,11 +290,6 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
     const blocked = err instanceof RunBlockedError;
     status = aborted ? RUN_STATUS.STOPPED : blocked ? RUN_STATUS.BLOCKED : RUN_STATUS.ERROR;
     if (!aborted) stats.errors.push(err.message);
-
-    if (blocked) {
-      const blockedUntil = Date.now() + settings.riskCooldownHours * 3600 * 1000;
-      await patchRuntime({ blockedUntil });
-    }
 
     const report = buildReport({
       runId,

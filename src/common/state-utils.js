@@ -86,8 +86,10 @@ export function summarizeTasks(tasks) {
  * v3: execução em segundo plano por padrão (a aba só aparece para captcha/2FA).
  * v4: teto de ações por execução sobe de 25 (padrão antigo) para 60.
  * v5: garante silentMode=true e keepWindowOpen=false em instalações existentes.
+ * v6: remove login por credenciais (campos user/passwordEnc/passwordPlain/cryptoOk),
+ *     o tempo máx. de captcha e o cooldown anti-bot (comportamentos fixos agora).
  */
-export const SETTINGS_VERSION = 5;
+export const SETTINGS_VERSION = 6;
 
 /**
  * Migra configurações salvas por versões anteriores.
@@ -132,6 +134,24 @@ export function migrateSettings(stored) {
     settings.silentMode = true;
     settings.keepWindowOpen = false;
     changed = true;
+  }
+
+  // v6: purge de campos legados — login por credenciais (nunca mais usado: o
+  // login é manual), tempo máx. de captcha e cooldown anti-bot (removidos das
+  // Opções: captcha/2FA/login aguardam sem limite e bloqueio anti-bot não pausa).
+  const LEGACY_KEYS = [
+    'user',
+    'passwordEnc',
+    'passwordPlain',
+    'cryptoOk',
+    'captchaTimeoutMin',
+    'riskCooldownHours'
+  ];
+  for (const key of LEGACY_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(settings, key)) {
+      delete settings[key];
+      changed = true;
+    }
   }
 
   if (changed || fromVersion !== SETTINGS_VERSION) {

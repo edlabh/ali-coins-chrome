@@ -16,24 +16,6 @@
     </header>
 
     <section class="card">
-      <h2>Credenciais</h2>
-      <label>
-        <span>Usuário (e-mail ou telefone)</span>
-        <input id="user" type="text" autocomplete="username" placeholder="seu_email@exemplo.com" />
-      </label>
-      <label>
-        <span>Senha</span>
-        <input id="password" type="password" autocomplete="new-password" placeholder="(deixe em branco para manter a atual)" />
-      </label>
-      <p id="passwordState" class="muted small"></p>
-      <p class="muted small">
-        A senha é cifrada (AES-256-GCM) com uma chave não exportável guardada na extensão antes de ser salva.
-        O salvamento <strong>exige criptografia</strong>: se o WebCrypto não estiver disponível, a gravação é
-        recusada — nunca gravamos senha em texto puro. Recomenda-se um perfil dedicado do Chrome para automação.
-      </p>
-    </section>
-
-    <section class="card">
       <h2>Agendamento</h2>
       <label class="row">
         <input id="scheduleEnabled" type="checkbox" />
@@ -98,20 +80,16 @@
     </section>
 
     <section class="card">
-      <h2>Captcha e segurança</h2>
-      <div class="grid">
-        <label>
-          <span>Tempo máx. aguardando captcha (min)</span>
-          <input id="captchaTimeoutMin" type="number" min="1" max="30" />
-        </label>
-        <label>
-          <span>Cooldown após bloqueio anti-bot (h)</span>
-          <input id="riskCooldownHours" type="number" min="1" max="168" />
-        </label>
-      </div>
+      <h2>Login, captcha e 2FA</h2>
       <p class="muted small">
-        Quando um captcha aparece, a janela móvel é trazida para frente e uma notificação é exibida.
-        Resolva o desafio na janela e a automação prossegue sozinha.
+        O login é <strong>100% manual</strong>: entre no AliExpress pelo navegador (ou na janela/aba que a
+        extensão abrir) e a automação reutiliza a sessão do seu perfil — nenhuma credencial é pedida ou guardada.
+      </p>
+      <p class="muted small">
+        Quando um captcha, 2FA ou login for necessário, a janela/aba é trazida para frente junto com uma
+        notificação. Resolva na hora e a automação prossegue sozinha — não há tempo máximo de espera (use o
+        botão <strong>Parar</strong> no popup se quiser cancelar). Bloqueios anti-bot (RGV587) encerram a execução
+        por precaução, sem pausar as próximas: você decide quando rodar de novo.
       </p>
     </section>
 
@@ -161,8 +139,6 @@
       <button id="btnSave" class="btn primary">Salvar</button>
       <button id="btnRun" class="btn">Executar agora</button>
       <button id="btnOpenWindow" class="btn">Abrir janela mobile</button>
-      <button id="btnClearCooldown" class="btn ghost">Liberar bloqueio</button>
-      <button id="btnClearCreds" class="btn ghost">Limpar credenciais</button>
       <button id="btnClearHistory" class="btn ghost">Limpar histórico</button>
     </section>
 
@@ -187,7 +163,8 @@
       <p class="muted small">
         Automação de conta própria no AliExpress pode contrariar os Termos de Uso do site e envolve risco de
         bloqueio anti-bot (RGV587) ou de segurança da conta. Use por sua conta e risco, com um perfil de Chrome
-        dedicado. A extensão nunca envia suas credenciais para terceiros — tudo roda localmente no seu navegador.
+        dedicado. A extensão não pede nem guarda suas credenciais e nada é enviado a terceiros — tudo roda
+        localmente no seu navegador.
       </p>
     </section>
   </main>

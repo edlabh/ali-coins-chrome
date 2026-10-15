@@ -4,7 +4,8 @@ Extensão Chrome (Manifest V3) que replica o projeto
 [edlabh/ali-coins](https://github.com/edlabh/ali-coins) no navegador:
 
 - abre uma **janela mobile emulando um Google Pixel 8**;
-- faz **login no AliExpress** com usuário e senha;
+- reutiliza a **sessão do seu perfil** no AliExpress (login é **100% manual** —
+  a extensão nunca pede nem guarda credenciais);
 - realiza o **check-in diário de moedas**;
 - executa as tarefas do painel **"Ganhe mais moedas"** (produtos surpresa, busca,
   scroll/permanência, resgates);
@@ -33,12 +34,11 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
 ## Uso
 
 1. Clique no ícone da extensão → **Opções**.
-2. **Credenciais (opcionais)**: a extensão funciona com a **sessão já logada** do
-   perfil do Chrome. Se quiser login automático quando a sessão expirar, preencha
-   **usuário** (e-mail ou telefone) e **senha** e salve — a senha é cifrada
-   (AES-256-GCM, chave não exportável) antes de ser gravada. Sem credenciais
-   salvas, a extensão executa normalmente; se o AliExpress pedir login, você recebe
-   uma **notificação pedindo para configurá-las nas Opções**.
+2. **Login manual**: entre no AliExpress normalmente pelo navegador (ou na janela/aba que
+   a extensão abrir). A extensão reutiliza a **sessão do perfil** — nenhuma credencial é
+   pedida ou guardada. Se a sessão expirar durante uma execução, a janela é trazida para
+   frente com uma **notificação de "login manual necessário"** e a automação continua
+   sozinha depois que você entrar.
 3. Configure, se quiser:
    - **Agendamento**: todos os dias no horário `HH:MM` (fuso do seu computador);
    - **Executar ao abrir o Chrome**;
@@ -48,7 +48,7 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
    - **Tarefa "Explore itens surpresa"** (não funciona no site mobile atual): ignorada
      por padrão — desmarque a opção para voltar a tentá-la;
    - **Modo silencioso** (**padrão**): executa em uma **aba de fundo, sem abrir
-     janela** — a aba só vem para frente se um captcha/2FA precisar de você;
+     janela** — a aba só vem para frente se um captcha/2FA/login precisar de você;
      desmarque para acompanhar a execução numa janela visível;
    - **Notificação condicional** (opcional): avisar apenas quando houver novidade
      (check-in novo, crédito do dia ou tarefas executadas) — erros sempre avisam;
@@ -57,8 +57,8 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
    a janela mobile a qualquer momento, use **Abrir janela mobile** nas Opções (a tela
    principal da extensão fica enxuta, só com as ações do dia a dia).
 5. Quando um captcha aparecer, a janela mobile é trazida para frente e uma notificação
-   é exibida. Resolva o desafio na janela — a automação continua sozinha (ou aborta após
-   o tempo máximo configurado, padrão 5 min).
+   é exibida. Resolva o desafio na janela — a automação continua sozinha, **sem tempo
+   máximo de espera** (use **Parar** no popup para cancelar).
 6. Ao concluir, a **janela mobile é fechada automaticamente** (dá para manter aberta nas
    Opções). O **extrato da execução** aparece no popup (check-in, tarefas, saldo) e o
    histórico completo fica em **Opções → Extrato de execuções**, com o log passo a passo
@@ -73,7 +73,8 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
 ```
 janela Pixel 8 → m.aliexpress.com/coin-index
    → sessão já ativa? login é dispensado; senão:
-     login (usuário → senha → [captcha: aguarda você] → [2FA: aguarda você])
+     LOGIN MANUAL (notificação + janela trazida para frente; aguarda você entrar
+     em qualquer aba do navegador — sem tempo máximo)
    → check-in diário (#signButton) + confirmação do marcador "today-checked"
    → tarefas "Ganhe mais moedas":
         busca (fone bluetooth) • scroll ≥16s (descontos) • resgates (COLLECT)
@@ -86,15 +87,14 @@ janela Pixel 8 → m.aliexpress.com/coin-index
 | Capacidade | ali-coins (Node/Playwright) | Esta extensão (MV3) |
 | --- | --- | --- |
 | Emulação mobile | Pixel 7 (Playwright `devices`) | Pixel 8 via janela 412×915 + UA/Client Hints (DNR) |
-| Login | usuário/senha + slide captcha | usuário/senha → captcha manual assistido |
+| Login | usuário/senha + slide captcha | sessão do perfil; **login manual assistido** quando expira (sem credenciais) |
 | Check-in | `#signButton` + confirmação + streak | idêntico (mesmos seletores/fallbacks) |
 | Tarefas | surpresa/busca/scroll/resgate, gaveta `.e2e_task` | idêntico (Explore itens surpresa ignorada por padrão) |
-| Captcha | tenta deslizar automaticamente | pausa e aguarda o usuário resolver (por design) |
+| Captcha | tenta deslizar automaticamente | pausa e aguarda o usuário resolver, sem tempo máximo (por design) |
 | Contabilidade | extrato desktop (mycoin): saldo, Bônus diário, Missões de moedas | idêntica — aba desktop dedicada, mesmo parser e prioridades |
-| Risco RGV587 | cooldown 48h + fail-fast | cooldown configurável (padrão 48h) |
+| Risco RGV587 | cooldown 48h + fail-fast | fail-fast: encerra o run por precaução, sem pausa fixa |
 | Agendamento | cron/Task Scheduler externo | `chrome.alarms` interno + execução ao abrir o Chrome |
 | Sessão | storageState criptografado (AES-GCM v3) | cookies do próprio perfil do Chrome (persistente) |
-| Senha em repouso | `credentials.env` (0600) | AES-256-GCM com chave não exportável (IndexedDB) |
 | Notificações | Telegram/webhook/heartbeat | notificações do Chrome + badge |
 | Multi-conta | até 20 contas | uma conta (simplificação intencional) |
 
@@ -105,8 +105,8 @@ src/background/
   service-worker.js  Roteador de mensagens, foco ao clicar em notificação e guarda de abas
   runner.js          Orquestrador principal (auth → checkin → tasks → finalize) + keepalive
   context.js         Primitivas do run (comandos com retry, logs, esperas abortáveis)
-  gates.js           Gates de intervenção do usuário (captcha e 2FA)
-  auth.js            Verificação de sessão (somente leitura) e login automático
+  gates.js           Gates de intervenção do usuário (captcha, 2FA e login manual)
+  auth.js            Verificação de sessão (somente leitura) + espera pelo login manual
   checkin-phase.js   Fase de check-in + consolidação da contabilidade e sequência
   tasks-phase.js     Loop de tarefas "Ganhe mais moedas", adoção de aba e surpresas
   item-tab.js        Detecção e fechamento de abas de produto abertas pelo feed
@@ -116,7 +116,7 @@ src/background/
   scheduler.js       chrome.alarms diário + catch-up + chrome.runtime.onStartup
   retry.js           Retentativa única (~45 min) após falha de execução
   tabs.js            Janela Pixel 8, session rules de UA/Client Hints (DNR) e abas órfãs
-  storage.js         chrome.storage.local/session (fila serializada) + cifragem da senha
+  storage.js         chrome.storage.local/session (fila serializada, sem credenciais)
   notify.js          Badge + notificações do sistema
 src/common/
   constants.js       URLs, presets de aparelho, comandos e configurações padrão
@@ -124,17 +124,16 @@ src/common/
   state-utils.js     Fila de tarefas (pickNextTask), migrações de schema e relatório
   schedule.js        Cálculo de horários, catch-up e formatação de tempo
   format.js          Formatadores compartilhados (pt-BR)
-  crypt.js           Criptografia AES-256-GCM com chave não exportável em IndexedDB
 src/content/
   main-world.js      Spoof dinâmico de navigator (UA/userAgentData) no MAIN world
   selectors.js       Seletores do AliExpress (espelho do ali-coins + fallbacks)
   task-classify.js   Classificação UMD das tarefas (surpresa/busca/app/scroll)
   ledger.js          Parser UMD do extrato desktop (mycoin) no fuso America/Los_Angeles
   dom.js             Helpers de DOM (clique humano, esperas, scroll interno, captcha, modal)
-  actions.js         Login, check-in, saldo, gaveta e ações por tarefa
+  actions.js         Check-in, saldo, gaveta e ações por tarefa (login não é automatizado)
   bridge.js          Ponte de comandos do service worker e sincronização do spoof
 src/popup/           Status ao vivo, chips de saldo/sequência, agenda e ações rápidas
-src/options/         Credenciais, agendamento, backup JSON e extrato de execuções
+src/options/         Agendamento, tarefas, aparelho, backup JSON e extrato de execuções
 ```
 
 Decisões de projeto relevantes:
@@ -175,19 +174,21 @@ Decisões de projeto relevantes:
   CDP (`Emulation.setDeviceMetricsOverride` 412×915 + toque + foco), e o próprio
   depurador impede o congelamento da aba em segundo plano. Limitação honesta:
   **não existe "headless" real para extensões** — o Chrome precisa estar aberto e
-  a aba existe (oculta); se um captcha/2FA exigir sua ação, a aba é trazida para
-  frente automaticamente e volta ao fundo depois.
+  a aba existe (oculta); se um captcha/2FA/login exigir sua ação, a aba é trazida
+  para frente automaticamente e volta ao fundo depois.
 - **Captcha**: a resolução é sempre manual (a extensão não tenta deslizar o desafio).
   Detecção por `#nc_1_n1z`, `.btn_slide`, containers `nocaptcha`/`baxia` e iframes.
+  Sem tempo máximo: resolve ou cancele pelo popup.
+- **Login**: 100% manual — a extensão nunca pede nem guarda credenciais. Quando o
+  AliExpress pede login, a janela é trazida para frente com notificação e a automação
+  aguarda a sessão aparecer (você pode entrar em qualquer aba do navegador).
 - **Tarefas de app** (Prize Land, minigames, quizzes, avaliações) são ignoradas por padrão,
   como no ali-coins (`SKIP_APP_ONLY_TASKS=true`).
 
 ## Segurança e privacidade
 
-- Credenciais ficam **apenas** em `chrome.storage.local` do seu perfil; a senha é cifrada
-  com AES-256-GCM usando uma chave gerada localmente e **não exportável** (IndexedDB da
-  extensão). O salvamento **exige** a criptografia: sem WebCrypto a gravação é recusada —
-  nenhuma senha é gravada em texto puro.
+- A extensão **não pede nem guarda credenciais**: o login é feito por você no próprio
+  AliExpress e a automação apenas reutiliza a sessão (cookies) do perfil do Chrome.
 - Nenhuma telemetria, nenhum servidor remoto. O único tráfego é para o AliExpress.
 - Recomendações: perfil dedicado do Chrome para automação; não sincronizar esse perfil;
   revisar as permissões antes de instalar.
@@ -209,9 +210,10 @@ publica automaticamente a GitHub Release ao enviar uma tag `v*`.
 
 ## Limitações conhecidas
 
-- **Captcha é manual** — exigência do projeto: aguardar o usuário resolver e prosseguir.
-- **RGV587** (controle de risco do AliExpress) pode exigir espera longa; a extensão pausa
-  por `riskCooldownHours` (padrão 48h) para não escalar o risco.
+- **Captcha, 2FA e login são manuais** — exigência do projeto: aguardar o usuário
+  resolver/entrar (sem tempo máximo) e prosseguir sozinho depois.
+- **RGV587** (controle de risco do AliExpress): a execução é encerrada por precaução
+  (sem pausa fixa) — você decide quando rodar de novo.
 - Layouts A/B do AliExpress podem quebrar seletores pontuais; os fallbacks por texto e
   por classe cobrem as variações conhecidas, mas ajustes podem ser necessários com o tempo.
 - Tarefas que exigem o app nativo nunca concluem via web (por isso são ignoradas).
@@ -225,11 +227,11 @@ manifest.json
 icons/                    ícones gerados
 docs/PROMPT.md            prompt de implementação gerado (skill prompt-engineer)
 src/background/           service worker, runner, scheduler, tabs, storage, notify
-src/common/               constantes, agendamento, fila de tarefas, criptografia
+src/common/               constantes, agendamento, fila de tarefas, contabilidade
 src/content/              seletores, classificação, DOM, ações, bridge
 src/popup/                popup de status
 src/options/              página de opções
-tests/unit.test.js        testes da lógica pura, criptografia, storage e manifest
+tests/unit.test.js        testes da lógica pura, storage e manifest
 tests/content-dom.test.js testes de DOM (jsdom) dos content scripts reais
 tools/check.mjs           verificador dinâmico de sintaxe e consistência de versão
 tools/pack-release.py     empacotador determinístico (.zip + SHA256SUMS.txt)

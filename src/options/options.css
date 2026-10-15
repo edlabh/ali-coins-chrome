@@ -73,7 +73,6 @@ label.row {
 label.row > span { margin: 0; color: var(--text); }
 
 input[type='text'],
-input[type='password'],
 input[type='time'],
 input[type='number'],
 select {

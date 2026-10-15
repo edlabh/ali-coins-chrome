@@ -1,5 +1,10 @@
 /**
- * Autenticação: verificação de sessão e login automático quando necessário.
+ * Autenticação: verificação de sessão e espera pelo LOGIN MANUAL do usuário.
+ *
+ * A extensão NÃO faz login por credenciais (usuário/senha foram removidos das
+ * Opções): quando o AliExpress não está logado, o run traz a janela/aba para
+ * frente, avisa (notificação + relatório) e aguarda o login — continuando
+ * automaticamente quando a sessão aparecer.
  */
 
 import { CMD, PHASE } from '../common/constants.js';
@@ -11,24 +16,22 @@ import {
   sleepAbortable,
   updatePhase
 } from './context.js';
-import { captchaGate, twoFAGate } from './gates.js';
-import { notify } from './notify.js';
-import { getPassword } from './storage.js';
+import { captchaGate, manualLoginGate, twoFAGate } from './gates.js';
 
 /**
- * Garante que a sessão está autenticada SEM tentar login desnecessário:
+ * Garante que a sessão está autenticada SEM tentar login automático:
  *   1. consulta o estado da página (CHECK_AUTH — somente leitura);
- *   2. só dispara o fluxo de login quando há formulário/prompt de login visível;
+ *   2. se houver formulário/prompt de login, abre o gate de login manual
+ *      (aguarda o usuário entrar; continua sozinho depois);
  *   3. UI indecisa por muito tempo → prossegue como sessão existente, deixando
- *      o check-in validar (auto-cura autentica se a página for de login).
+ *      o check-in validar (a auto-cura usa este mesmo fluxo).
  * @param {object} ctx
- * @returns {Promise<{ok: boolean, already?: boolean, assumed?: boolean, error?: string}>}
+ * @returns {Promise<{ok: boolean, already?: boolean, assumed?: boolean, manual?: boolean}>}
  */
 export async function ensureAuthenticated(ctx) {
   await updatePhase(PHASE.AUTH, 'Verificando se a sessão do AliExpress já está ativa…');
 
   const deadline = Date.now() + 25000;
-  let sawLoginForm = false;
   while (Date.now() < deadline) {
     if (await isStopRequestedNow()) throw new RunAbortedError();
 
@@ -55,81 +58,22 @@ export async function ensureAuthenticated(ctx) {
       return { ok: true, already: true };
     }
     if (st.state === 'needs_login') {
-      sawLoginForm = true;
-      break;
+      // Login manual: aguarda o usuário entrar (sem tempo máximo); o gate só
+      // retorna quando a sessão estiver ativa ou o run for cancelado.
+      await manualLoginGate(ctx);
+      return { ok: true, already: false, manual: true };
     }
     // 'pending': esqueleto do SPA ainda carregando.
     await sleepAbortable(1800);
   }
 
-  if (!sawLoginForm) {
-    // UI não decidiu em 25s (sem formulário e sem central de moedas visíveis):
-    // prossegue como sessão existente — o check-in valida de fato e a auto-cura
-    // autentica (ou pede credenciais) se a página for de login.
-    await updatePhase(PHASE.AUTH, 'Sessão não confirmada pela UI; prosseguindo.');
-    await appendLog(
-      ctx,
-      'A página não confirmou a sessão em 25s; prosseguindo — o check-in valida e a auto-cura autentica se necessário.'
-    );
-    return { ok: true, already: true, assumed: true };
-  }
-
-  // Login realmente necessário: sem credenciais não há como prosseguir. Avisa
-  // o usuário (notificação + log) e encerra o run com mensagem acionável.
-  const password = await getPassword(ctx.settings);
-  if (!ctx.settings.user || !password) {
-    const message =
-      'O AliExpress não está logado e não há usuário/senha configurados. Abra as Opções da extensão e informe as credenciais para o login automático.';
-    await appendLog(ctx, `⚠ Login necessário: ${message}`);
-    await notify(ctx.settings, {
-      id: 'ali-coins-missing-credentials',
-      title: 'Ali Coins: login necessário',
-      message,
-      requireInteraction: true
-    });
-    return { ok: false, missingCredentials: true, error: message };
-  }
-
-  await updatePhase(PHASE.AUTH, 'Login necessário. Autenticando no AliExpress…');
-  await appendLog(ctx, 'Login necessário — autenticando com as credenciais salvas.');
-  const result = await authenticate(ctx, password);
-  if (result.ok) await appendLog(ctx, 'Login concluído com sucesso.');
-  return result;
-}
-
-/**
- * Executa o plano de autenticação: DO_LOGIN em loop, tratando captcha/2FA.
- * A senha é decifrada uma única vez pelo chamador (ensureAuthenticated).
- * @param {object} ctx
- * @param {string} password
- */
-async function authenticate(ctx, password) {
-  for (let attempt = 1; attempt <= 6; attempt += 1) {
-    if (await isStopRequestedNow()) throw new RunAbortedError();
-    const res = await cmd(ctx, CMD.DO_LOGIN, {
-      user: ctx.settings.user,
-      password
-    }, { retries: 3 });
-
-    if (res.needsCaptcha) {
-      await captchaGate(ctx, 'login');
-      continue;
-    }
-    if (res.twoFA) {
-      await twoFAGate(ctx);
-      continue;
-    }
-    if (res.ok) {
-      return { ok: true, already: Boolean(res.already) };
-    }
-    if (res.pending) {
-      await sleepAbortable(2500);
-      continue;
-    }
-    if (res.error) {
-      return { ok: false, error: res.error };
-    }
-    await sleepAbortable(1500);
-  }
-  return { ok: false, error: 'Não foi possível concluir o login após várias tentativas.' };
+  // UI não decidiu em 25s (sem formulário e sem central de moedas visíveis):
+  // prossegue como sessão existente — o check-in valida de fato e a auto-cura
+  // abre o gate de login manual se a página for de login.
+  await updatePhase(PHASE.AUTH, 'Sessão não confirmada pela UI; prosseguindo.');
+  await appendLog(
+    ctx,
+    'A página não confirmou a sessão em 25s; prosseguindo — o check-in valida e, se necessário, o login manual é solicitado.'
+  );
+  return { ok: true, already: true, assumed: true };
 }
