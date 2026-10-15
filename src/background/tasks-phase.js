@@ -42,7 +42,17 @@ async function recoverToCoinPage(ctx, type) {
     ctx,
     `Sem content script durante ${type} — a aba saiu do AliExpress; retornando à central (a execução continua).`
   );
-  await ensureCoinPage(ctx, true);
+  // A aba ADOTADA da tarefa pode ter sido fechada pelo guarda de abas do
+  // service worker: restaura a aba principal ANTES de tentar navegar (antes, o
+  // comando seguinte ia para uma aba morta e derrubava a fase sem recuperação).
+  if (ctx.taskTabId) {
+    await restoreTaskTab(ctx).catch(() => {});
+  }
+  const alive = ctx.tabId ? await chrome.tabs.get(ctx.tabId).catch(() => null) : null;
+  if (!alive) {
+    throw new Error('A aba de execução não está mais disponível — a execução foi encerrada.');
+  }
+  await ensureCoinPage(ctx, true).catch(() => {});
   return null;
 }
 
@@ -88,6 +98,13 @@ async function adoptTaskTab(ctx) {
   );
   if (!candidate) return false;
 
+  // O guarda de abas do service worker pode fechar a aba a qualquer momento
+  // (transferindo a URL para a aba principal): confirma que ela ainda existe
+  // ANTES de adotar — adotar uma aba já fechada fazia os comandos seguintes
+  // falharem em "Sem content script" e derrubavam a fase inteira.
+  const preAlive = await chrome.tabs.get(candidate.id).catch(() => null);
+  if (!preAlive) return false;
+
   ctx.taskTabId = candidate.id;
   ctx.previousTabId = ctx.tabId;
   ctx.tabId = candidate.id;
@@ -101,6 +118,17 @@ async function adoptTaskTab(ctx) {
   // Inclui a aba adotada nas session rules de User-Agent/Client Hints mobile.
   await applyDeviceRules(ctx.previousTabId, ctx.settings, [candidate.id]).catch(() => {});
   await waitTabComplete(candidate.id, 20000);
+
+  // ...e DEPOIS de adotar: se a aba sumiu nesse meio-tempo (fechada pelo guarda
+  // de abas), desfaz a adoção e a rodada segue na aba PRINCIPAL — para onde a
+  // URL foi transferida — em vez de operar numa aba morta.
+  const postAlive = await chrome.tabs.get(candidate.id).catch(() => null);
+  if (!postAlive) {
+    await restoreTaskTab(ctx).catch(() => {});
+    await appendLog(ctx, 'A aba aberta pela tarefa foi fechada pelo controle de abas — seguindo na aba principal.');
+    return false;
+  }
+
   if (ctx.settings.silentMode) {
     // Mantém a emulação de viewport na aba adotada (melhor esforço).
     await applySilentEmulation(candidate.id, ctx.settings).catch(() => {});

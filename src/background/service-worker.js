@@ -97,9 +97,16 @@ chrome.tabs.onCreated.addListener(async (tab) => {
           if (targetUrl && targetUrl !== 'about:blank') break;
         }
       }
+      // NÃO fecha a aba se o loop de tarefas a ADOTOU nesse meio-tempo
+      // (runState.tabId passou a apontar para ela): nesse caso ela é a aba da
+      // rodada e será fechada por restoreTaskTab ao fim da tarefa. Fechá-la aqui
+      // fazia os comandos seguintes falharem numa aba morta e a coleta das
+      // tarefas restantes era abandonada.
+      const nowState = await getRunState();
+      if (nowState && nowState.active && nowState.tabId === tab.id) return;
       await chrome.tabs.remove(tab.id).catch(() => {});
       if (targetUrl && targetUrl !== 'about:blank') {
-        await chrome.tabs.update(runState.tabId, { url: targetUrl, active: false }).catch(() => {});
+        await chrome.tabs.update(nowState?.tabId || runState.tabId, { url: targetUrl, active: false }).catch(() => {});
       }
     }
   } catch {
