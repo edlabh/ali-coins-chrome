@@ -32,6 +32,7 @@ import { getRunState, getSurpriseTapped, patchRunState, saveSurpriseTapped } fro
 import {
   applyDeviceRules,
   closeOrphanTabs,
+  closeRunOwnedTabs,
   ensureCoinPage,
   getTabUrl,
   isAliexpressUrl,
@@ -63,6 +64,36 @@ async function recoverToCoinPage(ctx, type) {
   }
   await ensureCoinPage(ctx, true).catch(() => {});
   return null;
+}
+
+/**
+ * Recuperação "pesada" do painel de tarefas: fecha as abas/janelas abertas
+ * pelo SITE na rodada (um feed ainda vivo pode redirecionar a aba de origem de
+ * volta para recommends.html depois da volta à central), recarrega a central
+ * FORÇADO e CONFIRMA a URL final.
+ * @param {object} ctx
+ * @param {string} reason rótulo curto do motivo (para o extrato)
+ * @returns {Promise<boolean>} true quando a aba terminou na central
+ */
+async function recoverTasksPage(ctx, reason) {
+  const runState = await getRunState().catch(() => null);
+  await closeRunOwnedTabs(runState, { keep: [ctx.tabId] }).catch(() => {});
+  await closeOrphanTabs(
+    ctx.windowId,
+    ctx.tabId,
+    ctx.ledgerTabId ? [ctx.ledgerTabId] : [],
+    ctx.knownTabIds
+  ).catch(() => {});
+  const ok = await ensureCoinPage(ctx, true).catch(() => false);
+  if (!ok) {
+    const urlFinal = await getTabUrl(ctx.tabId).catch(() => '');
+    await appendLog(
+      ctx,
+      `A aba não confirmou a central de moedas (${truncate(String(urlFinal), 60)}) — recuperação: ${reason}.`
+    );
+  }
+  await sleepAbortable(1500);
+  return ok;
 }
 
 /** commandWithCaptcha tolerante a páginas sem content script. */
@@ -357,6 +388,9 @@ const LATE_PROGRESS_CONFIRM_MS = 4000;
 // nova (e o progresso observado zera as tentativas do título) — igual ao
 // TASK_ROUND_MAX_ATTEMPTS do ali-coins.
 const MAX_ROUND_ATTEMPTS = 3;
+// Teto de recuperações "pesadas" do painel (fechar abas do site + recarregar a
+// central com confirmação) antes de abandonar as tarefas restantes do run.
+const MAX_HARD_RECOVERIES = 3;
 
 /**
  * @param {object} ctx
@@ -377,20 +411,36 @@ export async function runTasksPhase(ctx) {
   let actions = 0;
   let guard = 0;
   let drawerRetries = 0;
+  let hardRecoveries = 0;
 
   while (actions < settings.maxTaskActions && guard < 80) {
     guard += 1;
     if (await isStopRequestedNow()) throw new RunAbortedError();
 
-    await ensureCoinPage(ctx, false);
+    // A central precisa estar CONFIRMADA antes de abrir o painel — o site pode
+    // re-redirecionar a aba para subpáginas do coin-index (recommends.html do
+    // feed patrocinado) logo após o load.
+    const onCentral = await ensureCoinPage(ctx, false).catch(() => false);
+    if (!onCentral) {
+      if (hardRecoveries >= MAX_HARD_RECOVERIES) {
+        const urlAfter = await getTabUrl(ctx.tabId).catch(() => '');
+        stats.errors.push(
+          `Não foi possível retornar à central de moedas (URL: ${truncate(String(urlAfter), 120)}).`.slice(0, 500)
+        );
+        await appendLog(ctx, 'Falha ao retornar à central de moedas — encerrando as tarefas restantes.');
+        break;
+      }
+      hardRecoveries += 1;
+      await recoverTasksPage(ctx, 'central não confirmada');
+      continue;
+    }
 
     // Guarda de navegação: a aba pode ter saído do AliExpress entre iterações
     // (interstitial anti-bot/reload) — volta antes de tentar qualquer comando.
     const urlNow = await getTabUrl(ctx.tabId);
     if (urlNow && !isAliexpressUrl(urlNow)) {
       await appendLog(ctx, `A aba saiu do AliExpress (${truncate(urlNow, 60)}) — retornando à central.`);
-      await ensureCoinPage(ctx, true);
-      await sleepAbortable(1500);
+      await recoverTasksPage(ctx, 'página externa');
       continue;
     }
 
@@ -401,10 +451,9 @@ export async function runTasksPhase(ctx) {
       continue;
     }
     if (!drawer.ok) {
-      // Recuperação: a aba pode ter ficado numa subpágina do coin-index (ex.:
-      // recommends.html do feed patrocinado) ou a gaveta falhou de forma
-      // transitória. Recarrega a central FORÇADO e tenta UMA vez antes de
-      // encerrar a fase — antes, uma única falha abandonava as tarefas restantes.
+      // Recuperação leve (1×): fecha abas do site + recarrega a central com
+      // confirmação. Cobre a aba presa numa subpágina do coin-index (ex.:
+      // recommends.html do feed patrocinado) e falhas transitórias da gaveta.
       if (drawerRetries < 1) {
         drawerRetries += 1;
         const dbgRetry = drawer.debug ? ` Diagnóstico: ${JSON.stringify(drawer.debug)}` : '';
@@ -412,16 +461,29 @@ export async function runTasksPhase(ctx) {
           ctx,
           `Painel "Ganhe mais moedas" não abriu.${dbgRetry} Recarregando a central de moedas e tentando novamente.`
         );
-        await ensureCoinPage(ctx, true);
-        await sleepAbortable(1500);
+        await recoverTasksPage(ctx, 'painel não abriu');
         continue;
       }
+      // Recuperação leve esgotada: recuperação PESADA e CONTINUA — antes, um
+      // único ciclo falho abandonava todas as tarefas restantes do run. Só
+      // encerra a fase quando o teto de recuperações pesadas acabar.
       const dbg = drawer.debug ? ` Diagnóstico: ${JSON.stringify(drawer.debug)}` : '';
+      drawerRetries = 0;
+      if (hardRecoveries < MAX_HARD_RECOVERIES) {
+        hardRecoveries += 1;
+        await appendLog(
+          ctx,
+          `Painel "Ganhe mais moedas" inacessível.${dbg} Reiniciando a central (recuperação ${hardRecoveries}/${MAX_HARD_RECOVERIES}).`
+        );
+        await recoverTasksPage(ctx, 'painel inacessível');
+        continue;
+      }
       stats.errors.push(`Painel "Ganhe mais moedas" inacessível.${dbg}`.slice(0, 500));
       await appendLog(ctx, 'Falha ao abrir o painel de tarefas "Ganhe mais moedas".');
       break;
     }
     drawerRetries = 0;
+    hardRecoveries = 0;
 
     const extraction = await safeTaskCommand(ctx, CMD.EXTRACT_TASKS, {}, 'tasks');
     if (extraction === null) {
@@ -736,13 +798,18 @@ export async function runTasksPhase(ctx) {
     );
     await patchRunState({ stats: { ...stats } });
 
-    await ensureCoinPage(ctx, false);
+    // Fecha PRIMEIRO as abas/janelas abertas pelo site (um feed ainda vivo pode
+    // redirecionar a aba de origem de volta para recommends.html) e só então
+    // volta à central — com confirmação da URL final.
+    const runStateBeforeReturn = await getRunState().catch(() => null);
+    await closeRunOwnedTabs(runStateBeforeReturn, { keep: [ctx.tabId] }).catch(() => {});
     await closeOrphanTabs(
       ctx.windowId,
       ctx.tabId,
       ctx.ledgerTabId ? [ctx.ledgerTabId] : [],
       ctx.knownTabIds
     ).catch(() => {});
+    await ensureCoinPage(ctx, false);
 
     // Pausa aleatória entre tarefas (anti-detecção), como TASK_PAUSE_* do ali-coins.
     const pause = randInt(settings.pauseBetweenTasksMinMs, settings.pauseBetweenTasksMaxMs);

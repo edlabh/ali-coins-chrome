@@ -183,6 +183,12 @@ Decisões de projeto relevantes:
   exibe um **aviso de depuração** na janela de execução enquanto ela estiver aberta
   — não cancele, é o mecanismo que aplica os cliques. Se o aviso for cancelado, a
   extensão cai sozinha no fallback com eventos sintéticos.
+- **Painel "Ganhe mais moedas" resiliente**: a volta à central é **confirmada**
+  (o site pode re-redirecionar a aba para o feed patrocinado `recommends.html`
+  logo após o load); abas/janelas abertas pelo site são **fechadas antes** da
+  volta (um feed ainda vivo pode puxar a aba de origem de volta) e, se o painel
+  falhar, a extensão faz recuperações (leve + pesadas, com teto) **em vez de
+  abandonar as tarefas restantes** do run.
 - **Modo silencioso (segundo plano, padrão)**: a execução ocorre numa **JANELA
   DEDICADA** (normal, criada **sem foco**) — todas as abas do run (central,
   tarefas, fichas que o site abre) vivem nela e **suas janelas/abas não são

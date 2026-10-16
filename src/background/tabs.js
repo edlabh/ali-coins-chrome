@@ -380,8 +380,45 @@ function isBlankUrl(url) {
  * @param {string} url
  * @param {number} [timeoutMs=45000]
  */
+/**
+ * Aguarda a navegação NOVA realmente começar (corrida do "complete" antigo:
+ * logo após `tabs.update`, a aba ainda pode reportar a página ANTERIOR como
+ * 'complete'; sem esta espera, `waitTabComplete` retornava na hora e os
+ * comandos seguintes rodavam na página antiga — ex.: central "confirmada" com
+ * a aba ainda no feed recommends.html).
+ * @param {number} tabId
+ * @param {string} before URL atual antes do update
+ * @param {number} timeoutMs
+ */
+async function waitForNavigationStart(tabId, before, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      const now = tab.url || '';
+      const pending = tab.pendingUrl || '';
+      if ((pending && pending !== before) || (now && now !== before) || tab.status === 'loading') {
+        return true;
+      }
+    } catch {
+      return false; // aba fechada: waitTabComplete resolve abaixo
+    }
+    await sleep(100);
+  }
+  return false;
+}
+
+/**
+ * Navega a aba e aguarda a conclusão de verdade (início da nova navegação +
+ * status 'complete'), com folga de estabilização.
+ * @param {number} tabId
+ * @param {string} url
+ * @param {number} [timeoutMs=45000]
+ */
 export async function navigateTab(tabId, url, timeoutMs = 45000) {
+  const before = await getTabUrl(tabId);
   await chrome.tabs.update(tabId, { url });
+  await waitForNavigationStart(tabId, before, Math.min(timeoutMs, 4000));
   await waitTabComplete(tabId, timeoutMs);
   await sleep(1200);
 }
@@ -428,6 +465,46 @@ export async function closeOrphanTabs(windowId, keepTabId, extraKeep = [], known
   } catch {
     // Janela pode ter sido fechada pelo usuário: ignora.
   }
+}
+
+/**
+ * Fecha abas abertas pelo PRÓPRIO SITE durante a rodada (feed/ficha/popup) em
+ * **qualquer janela**, exceto a aba principal, a do extrato e a aba adotada da
+ * tarefa. A detecção é pelo OPENER: apenas abas cujo `openerTabId` é uma das
+ * abas do run são candidatas — abas do usuário nunca têm esse opener.
+ *
+ * Essencial ANTES de voltar à central: um feed ainda VIVO pode redirecionar a
+ * aba de origem (opener) de volta para `recommends.html` depois da volta —
+ * era uma das causas do painel "Ganhe mais moedas" inacessível alguns segundos
+ * após a tarefa "Explore sponsored items".
+ * @param {object} runState ({ tabId, ledgerTabId })
+ * @param {{keep?: number[], openerIds?: number[]}} [options]
+ * @returns {Promise<number>} quantas abas foram fechadas
+ */
+export async function closeRunOwnedTabs(runState, { keep = [], openerIds = [] } = {}) {
+  const keepSet = new Set([
+    ...keep.filter((id) => typeof id === 'number'),
+    ...(runState && typeof runState.tabId === 'number' ? [runState.tabId] : []),
+    ...(runState && typeof runState.ledgerTabId === 'number' ? [runState.ledgerTabId] : [])
+  ]);
+  const openers = new Set([
+    ...(runState && typeof runState.tabId === 'number' ? [runState.tabId] : []),
+    ...openerIds.filter((id) => typeof id === 'number')
+  ]);
+  if (openers.size === 0) return 0;
+  let closed = 0;
+  try {
+    const tabs = await chrome.tabs.query({});
+    for (const tab of tabs) {
+      if (!tab || typeof tab.id !== 'number' || keepSet.has(tab.id)) continue;
+      if (typeof tab.openerTabId !== 'number' || !openers.has(tab.openerTabId)) continue;
+      await chrome.tabs.remove(tab.id).catch(() => {});
+      closed += 1;
+    }
+  } catch {
+    // Janela/aba fechada no meio: ignora.
+  }
+  return closed;
 }
 
 /**
@@ -646,15 +723,27 @@ export async function getTabUrl(tabId) {
 
 /**
  * Garante que a aba principal está na central de moedas.
+ *
+ * Navega (quando preciso/forçado) e **CONFIRMA a URL final**: o site pode
+ * re-redirecionar a aba de volta para subpáginas do coin-index — ex.:
+ * `recommends.html` do feed patrocinado — logo após o load. Sem a confirmação,
+ * o run acreditava estar na central e a abertura do painel falhava lá
+ * (cards: 0, drawerNode: false).
  * @param {object} ctx ({ tabId, settings })
  * @param {boolean} [force] força navegação mesmo se já parecer na URL
+ * @returns {Promise<boolean>} true quando a aba terminou NA central
  */
 export async function ensureCoinPage(ctx, force = false) {
-  const url = await getTabUrl(ctx.tabId);
-  if (!isCoinUrl(url) || force) {
+  if (!force && isCoinUrl(await getTabUrl(ctx.tabId))) return true;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
     await applyDeviceRules(ctx.tabId, ctx.settings);
     await navigateTab(ctx.tabId, `${COIN_URL_TASKS}#ac_run=1`);
+    if (isCoinUrl(await getTabUrl(ctx.tabId))) return true;
+    await sleep(700);
+    if (isCoinUrl(await getTabUrl(ctx.tabId))) return true;
+    if (attempt < 2) await sleep(700);
   }
+  return false;
 }
 
 /**

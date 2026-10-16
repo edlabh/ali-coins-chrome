@@ -34,6 +34,7 @@ import {
 import { ensureCoinPage, isCoinUrl } from '../src/background/tabs.js';
 import {
   clearDeviceRules,
+  closeRunOwnedTabs,
   prepareRunTab,
   registerAuxTab,
   restoreUserFocus,
@@ -893,23 +894,11 @@ test('storage: patchRunState serializa escritas concorrentes sem perder campos',
   }
 });
 
-test('tabs: ensureCoinPage volta à central a partir de subpáginas coin-index (recommends.html)', async () => {
+test('tabs: ensureCoinPage volta à central a partir de subpáginas coin-index (recommends.html) e CONFIRMA a URL final', async () => {
   const originalChrome = globalThis.chrome;
-  const updates = [];
   const RECOMMENDS_URL =
     'https://m.aliexpress.com/p/coin-index/recommends.html?_immersiveMode=true&from=mission&idem_id=1792060116079';
-  globalThis.chrome = {
-    tabs: {
-      get: async () => ({ id: 9, status: 'complete', url: RECOMMENDS_URL }),
-      update: async (tabId, props) => {
-        updates.push({ tabId, props });
-        return {};
-      }
-    },
-    declarativeNetRequest: {
-      updateSessionRules: async () => {}
-    }
-  };
+  const CENTRAL_URL = 'https://m.aliexpress.com/p/coin-index/index.html?_immersiveMode=true&from=pc302';
   try {
     // Só a central (`/p/coin-index/index.html`) é reconhecida: o feed de itens
     // patrocinados (recommends.html) NÃO pode passar por "já na central" — era
@@ -925,10 +914,115 @@ test('tabs: ensureCoinPage volta à central a partir de subpáginas coin-index (
     assert.equal(isCoinUrl('https://www.aliexpress.com/p/coin-pc-index/mycoin.html'), false);
     assert.equal(isCoinUrl('https://m.aliexpress.com/item/100500.html'), false);
 
-    await ensureCoinPage({ tabId: 9, settings: {} }, false);
-    assert.equal(updates.length, 1, 'deve navegar de volta à central');
-    assert.equal(updates[0].tabId, 9);
-    assert.match(updates[0].props.url, /\/p\/coin-index\/index\.html\?/);
+    // (A) Já na central: nenhuma navegação.
+    {
+      const updates = [];
+      globalThis.chrome = {
+        tabs: {
+          get: async () => ({ id: 9, status: 'complete', url: CENTRAL_URL }),
+          update: async (tabId, props) => {
+            updates.push({ tabId, props });
+            return {};
+          }
+        },
+        declarativeNetRequest: { updateSessionRules: async () => {} }
+      };
+      const ok = await ensureCoinPage({ tabId: 9, settings: {} }, false);
+      assert.equal(ok, true);
+      assert.equal(updates.length, 0, 'na central não há navegação');
+    }
+
+    // (B) Feed recomenda → navega para a central. O "complete" da página ANTIGA
+    // com navegação PENDENTE (corrida) não pode encerrar a espera: a aba só
+    // conta como pronta quando a URL nova chega.
+    {
+      const updates = [];
+      let calls = 0;
+      globalThis.chrome = {
+        tabs: {
+          get: async () => {
+            calls += 1;
+            if (calls === 1) return { id: 9, status: 'complete', url: RECOMMENDS_URL };
+            // Corrida real: status ainda 'complete' (página antiga) + pendingUrl.
+            if (calls === 2) {
+              return { id: 9, status: 'complete', url: RECOMMENDS_URL, pendingUrl: CENTRAL_URL };
+            }
+            return { id: 9, status: 'complete', url: CENTRAL_URL };
+          },
+          update: async (tabId, props) => {
+            updates.push({ tabId, props });
+            return {};
+          }
+        },
+        declarativeNetRequest: { updateSessionRules: async () => {} }
+      };
+      const ok = await ensureCoinPage({ tabId: 9, settings: {} }, false);
+      assert.equal(ok, true, 'central confirmada');
+      assert.equal(updates.length, 1, 'uma navegação é suficiente');
+      assert.equal(updates[0].tabId, 9);
+      assert.match(updates[0].props.url, /\/p\/coin-index\/index\.html\?/);
+    }
+
+    // (C) O site RE-REDIRECIONA de volta ao feed logo após o load: a
+    // confirmação detecta e tenta de novo; se nunca confirmar, retorna false
+    // (o background usa isso para as recuperações — antes, o run seguia
+    // acreditando estar na central e a gaveta falhava).
+    {
+      const updates = [];
+      let calls = 0;
+      globalThis.chrome = {
+        tabs: {
+          get: async () => {
+            calls += 1;
+            // Exits rápidos da espera de navegação (ena. 'loading'), depois o
+            // feed SEMPRE de volta.
+            if (calls % 5 === 2) return { id: 9, status: 'loading', url: RECOMMENDS_URL };
+            return { id: 9, status: 'complete', url: RECOMMENDS_URL };
+          },
+          update: async (tabId, props) => {
+            updates.push({ tabId, props });
+            return {};
+          }
+        },
+        declarativeNetRequest: { updateSessionRules: async () => {} }
+      };
+      const ok = await ensureCoinPage({ tabId: 9, settings: {} }, false);
+      assert.equal(ok, false, 'sem confirmação da central');
+      assert.equal(updates.length, 2, 'tenta de novo antes de desistir');
+    }
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+  }
+});
+
+test('tabs: closeRunOwnedTabs fecha abas do SITE (opener do run) em qualquer janela; nunca toca principal/extrato/usuário', async () => {
+  const originalChrome = globalThis.chrome;
+  const removed = [];
+  globalThis.chrome = {
+    tabs: {
+      query: async () => [
+        { id: 10, windowId: 1 }, // aba principal do run
+        { id: 11, windowId: 1 }, // aba do extrato
+        { id: 12, windowId: 1, openerTabId: 10 }, // aba do site (feed) na janela do run
+        { id: 13, windowId: 2, openerTabId: 10 }, // aba do site em OUTRA janela (popup)
+        { id: 14, windowId: 2, openerTabId: 99 }, // aba de outro opener (não do run)
+        { id: 15, windowId: 1, openerTabId: null }, // aba sem opener (usuário)
+        { id: 16, windowId: 1, openerTabId: 10 } // candidata, mas protegida pelo keep
+      ],
+      remove: async (id) => {
+        removed.push(id);
+      }
+    }
+  };
+  try {
+    const closed = await closeRunOwnedTabs({ tabId: 10, ledgerTabId: 11 }, { keep: [16] });
+    assert.deepEqual(
+      removed.sort((a, b) => a - b),
+      [12, 13],
+      'fecha só as abas abertas pelo site (opener = aba do run), em qualquer janela'
+    );
+    assert.equal(closed, 2);
   } finally {
     if (originalChrome === undefined) delete globalThis.chrome;
     else globalThis.chrome = originalChrome;
