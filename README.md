@@ -72,7 +72,9 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
 6. Ao concluir, a **janela mobile é fechada automaticamente** (dá para manter aberta nas
    Opções). O **extrato da execução** aparece no popup (check-in, tarefas, saldo) e o
    histórico completo fica em **Opções → Extrato de execuções**, com o log passo a passo
-   e o aviso quando o check-in do dia **já havia sido coletado**.
+   e o aviso quando o check-in do dia **já havia sido coletado**. O resumo do extrato
+   (página mycoin) mostra **sempre**: **Bônus diário** (check-in), **Missões de moedas**
+   (soma das tarefas) e, quando existir, o **recuperado pelo cancelamento de pedidos**.
 
 > 💡 **Fuso horário:** o "dia contábil" do AliExpress vira à meia-noite do Pacífico
 > (America/Los_Angeles, UTC-7/-8). Para garantir que o check-in caia sempre no dia novo,

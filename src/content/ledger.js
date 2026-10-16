@@ -26,9 +26,15 @@
   'use strict';
 
   // Rótulos de CHECK-IN no extrato desktop, bilíngues. Todo o RESTANTE dos créditos
-  // do dia (Coin page task, Widget coins, Missões de moedas, ...) conta como tarefas.
+  // do dia (Coin page task, Widget coins, Missões de moedas, ...) conta como tarefas
+  // — EXCETO valores recuperados de pedidos cancelados, que são classificados
+  // separadamente (`refundCoins`) por não serem ganho de tarefa.
   const CHECKIN_LABEL_PATTERN =
     '(?:App daily check-in|Check-in di[áa]rio no app|B[ôo]nus di[áa]rio|Daily bonus)';
+
+  // Rótulos de RECUPERAÇÃO de moedas por pedido cancelado (crédito de estorno):
+  // pt ("Recuperado pelo cancelamento do pedido") e variantes em inglês.
+  const REFUND_LABEL_RE = /recuperad[oa][^\n]*cancel|recovered[^\n]*cancel/i;
 
   /** Padrões multilíngues (pt, en, es) de sequência (streak). */
   const STREAK_PATTERNS = [
@@ -129,10 +135,11 @@
   }
 
   /**
-   * Soma o extrato do dia: check-in ("Bônus diário") vs missões/tarefas.
-   * Cada lançamento é "<rótulo>\n+<valor>"; aceita separador de milhar.
+   * Soma o extrato do dia em três baldes: check-in ("Bônus diário"), MISSÕES/
+   * tarefas e RECUPERAÇÃO por pedido cancelado ("Recuperado pelo cancelamento
+   * do pedido"). Cada lançamento é "<rótulo>\n+<valor>"; aceita separador de milhar.
    * @param {string} todaySec
-   * @returns {{bonusCoins: number|null, missionsCoins: number, bonusCount: number, missionsCount: number}}
+   * @returns {{bonusCoins: number|null, missionsCoins: number, bonusCount: number, missionsCount: number, refundCoins: number, refundCount: number}}
    */
   function extractTodayLedger(todaySec) {
     const text = typeof todaySec === 'string' ? todaySec : '';
@@ -140,22 +147,29 @@
     let bonusCount = 0;
     let missionsCoins = 0;
     let missionsCount = 0;
+    let refundCoins = 0;
+    let refundCount = 0;
 
+    const checkinRe = new RegExp(CHECKIN_LABEL_PATTERN, 'i');
     const entryRe = /([^\n+][^\n]*)\n\s*\+([0-9][0-9.,]*)/g;
     for (const m of text.matchAll(entryRe)) {
       const label = (m[1] || '').trim();
       const value = parseInt(String(m[2]).replace(/[.,]/g, ''), 10);
       if (!label || Number.isNaN(value)) continue;
 
-      if (new RegExp(CHECKIN_LABEL_PATTERN, 'i').test(label)) {
+      if (checkinRe.test(label)) {
         bonusCount += 1;
         bonusCoins = (bonusCoins || 0) + value;
+      } else if (REFUND_LABEL_RE.test(label)) {
+        // Recuperação de moedas por pedido cancelado: NÃO é ganho de tarefa.
+        refundCount += 1;
+        refundCoins += value;
       } else {
         missionsCount += 1;
         missionsCoins += value;
       }
     }
-    return { bonusCoins, missionsCoins, bonusCount, missionsCount };
+    return { bonusCoins, missionsCoins, bonusCount, missionsCount, refundCoins, refundCount };
   }
 
   /**
@@ -284,6 +298,8 @@
       todayBonusCoins: ledger.bonusCoins,
       todayMissionsCoins: ledger.missionsCoins,
       todayMissionsCount: ledger.missionsCount,
+      todayRefundCoins: ledger.refundCoins,
+      todayRefundCount: ledger.refundCount,
       textStreak: streakFromText(t),
       historyStreak: streakFromHistory(t, now),
       domStreak: Number.isFinite(domStreak) && domStreak > 7 ? domStreak : null,

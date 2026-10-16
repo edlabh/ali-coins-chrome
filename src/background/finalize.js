@@ -52,16 +52,25 @@ export async function runFinalAccounting(ctx, checkin, initialBalanceForTasks, p
     );
   }
 
-  // Missões de moedas do extrato (soma das tarefas do dia) e delta neste run.
+  // Extrato do dia: Bônus diário (check-in), Missões de moedas (soma das
+  // tarefas) e recuperação por pedido cancelado — informados SEMPRE (mesmo
+  // quando o check-in já havia sido coletado antes deste run).
   const ledgerSummary =
     finalLedger && Number.isFinite(finalLedger.todayMissionsCoins)
       ? {
+          bonusCoins: Number.isFinite(finalLedger.todayBonusCoins)
+            ? finalLedger.todayBonusCoins
+            : null,
           missionsCoins: finalLedger.todayMissionsCoins,
           missionsCount: finalLedger.todayMissionsCount ?? null,
           missionsGained:
             Number.isFinite(postMissions) && postMissions !== null
               ? Math.max(0, finalLedger.todayMissionsCoins - postMissions)
               : null,
+          refundCoins: Number.isFinite(finalLedger.todayRefundCoins)
+            ? finalLedger.todayRefundCoins
+            : 0,
+          refundCount: finalLedger.todayRefundCount ?? 0,
           desktopStreak: desktopStreakOf(finalLedger)
         }
       : null;
@@ -77,6 +86,19 @@ export async function runFinalAccounting(ctx, checkin, initialBalanceForTasks, p
   }
   if (tasksGained !== null) {
     await appendLog(ctx, `Tarefas (delta de saldo): ${tasksGained >= 0 ? '+' : ''}${tasksGained} moedas.`);
+  }
+  if (ledgerSummary) {
+    // Linha essencial (sempre visível no extrato): Bônus diário (check-in),
+    // Missões de moedas (tarefas) e, quando existir, o recuperado de pedidos
+    // cancelados — mesma leitura da página mycoin.
+    const parts = [
+      `Bônus diário (check-in): +${Number.isFinite(ledgerSummary.bonusCoins) ? ledgerSummary.bonusCoins : 0}`,
+      `Missões de moedas (tarefas): +${ledgerSummary.missionsCoins}`
+    ];
+    if (ledgerSummary.refundCoins > 0) {
+      parts.push(`Recuperado (pedido cancelado): +${ledgerSummary.refundCoins}`);
+    }
+    await appendLog(ctx, `Extrato de hoje (mycoin): ${parts.join(' • ')}.`);
   }
 
   return { balanceAfter, tasksGained, ledgerSummary };

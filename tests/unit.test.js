@@ -1125,8 +1125,57 @@ test('ledger: extractTodayLedger soma Bônus diário e Missões de moedas (pt/en
     bonusCoins: null,
     missionsCoins: 0,
     bonusCount: 0,
-    missionsCount: 0
+    missionsCount: 0,
+    refundCoins: 0,
+    refundCount: 0
   });
+});
+
+test('ledger: "Recuperado pelo cancelamento do pedido" é classificado à parte (não é missão)', () => {
+  const { extractTodayLedger, readMycoinPage } = loadLedger();
+
+  const pt = `
+    20/09/2026 PT
+    Bônus diário
+    +40
+    Missões de moedas
+    +5
+    Recuperado pelo cancelamento do pedido
+    +12
+    Missões de moedas
+    +3
+  `;
+  const res = extractTodayLedger(pt);
+  assert.equal(res.bonusCoins, 40);
+  assert.equal(res.missionsCoins, 8, 'recuperações ficam FORA das missões de moedas');
+  assert.equal(res.missionsCount, 2);
+  assert.equal(res.refundCoins, 12);
+  assert.equal(res.refundCount, 1);
+
+  const en = `
+    9/20/2026 PT
+    Daily bonus
+    +1
+    Coin missions
+    +5
+    Recovered from order cancellation
+    +7
+  `;
+  const enRes = extractTodayLedger(en);
+  assert.equal(enRes.bonusCoins, 1);
+  assert.equal(enRes.missionsCoins, 5);
+  assert.equal(enRes.refundCoins, 7);
+  assert.equal(enRes.refundCount, 1);
+
+  // readMycoinPage expõe os TRÊS valores (bônus, missões e recuperado).
+  const today =
+    new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Los_Angeles' }) + ' PT';
+  const text = `Minhas moedas\n1000\n${today}\nBônus diário\n+40\nMissões de moedas\n+5\nRecuperado pelo cancelamento do pedido\n+9\n`;
+  const read = readMycoinPage(text);
+  assert.equal(read.todayBonusCoins, 40);
+  assert.equal(read.todayMissionsCoins, 5);
+  assert.equal(read.todayRefundCoins, 9);
+  assert.equal(read.todayRefundCount, 1);
 });
 
 test('ledger: extrato real em inglês e Widget coins contam como tarefa', () => {

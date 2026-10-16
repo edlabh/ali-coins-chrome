@@ -173,8 +173,18 @@ async function refresh() {
         `Tarefas (delta de saldo): ${lastReport.tasksGained >= 0 ? '+' : ''}${lastReport.tasksGained} moedas`
       );
     }
+    if (lastReport.ledger && Number.isFinite(lastReport.ledger.bonusCoins)) {
+      lines.push(`Bônus diário (extrato hoje): +${lastReport.ledger.bonusCoins}`);
+    }
     if (lastReport.ledger && Number.isFinite(lastReport.ledger.missionsCoins)) {
       lines.push(`Missões de moedas (extrato hoje): +${lastReport.ledger.missionsCoins}`);
+    }
+    if (
+      lastReport.ledger &&
+      Number.isFinite(lastReport.ledger.refundCoins) &&
+      lastReport.ledger.refundCoins > 0
+    ) {
+      lines.push(`Recuperado (pedido cancelado): +${lastReport.ledger.refundCoins}`);
     }
 
     // Extrato das ações de tarefas (título + tipo), como no relatório do ali-coins.

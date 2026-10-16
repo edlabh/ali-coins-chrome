@@ -56,9 +56,18 @@ function runDetailLines(run) {
   if (Number.isFinite(run.tasksGained)) {
     lines.push(`Tarefas (saldo): ${run.tasksGained >= 0 ? '+' : ''}${run.tasksGained} moedas`);
   }
+  if (run.ledger && Number.isFinite(run.ledger.bonusCoins)) {
+    lines.push(`Bônus diário no extrato (hoje): +${run.ledger.bonusCoins}`);
+  }
   if (run.ledger && Number.isFinite(run.ledger.missionsCoins)) {
     const count = run.ledger.missionsCount ? ` (${run.ledger.missionsCount} lançamentos)` : '';
     lines.push(`Missões de moedas no extrato (hoje): +${run.ledger.missionsCoins}${count}`);
+  }
+  if (run.ledger && Number.isFinite(run.ledger.refundCoins) && run.ledger.refundCoins > 0) {
+    const count = run.ledger.refundCount > 1 ? ` (${run.ledger.refundCount} lançamentos)` : '';
+    lines.push(
+      `Recuperado pelo cancelamento de pedidos (extrato hoje): +${run.ledger.refundCoins}${count}`
+    );
   }
   for (const t of run.tasks || []) {
     const kind = t.kind === 'claim' ? 'resgate' : t.kind || 'ação';
