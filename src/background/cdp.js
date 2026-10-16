@@ -13,6 +13,8 @@
  */
 
 import { pickDevice } from '../common/constants.js';
+import { getRunState } from './storage.js';
+import { restoreUserFocus } from './tabs.js';
 
 const CDP_VERSION = '1.3';
 const attachedTabs = new Set();
@@ -58,6 +60,26 @@ async function ensureNewDocScript(tabId) {
 }
 
 /**
+ * Anexar o depurador é uma operação nativa que pode trazer a aba (e a janela
+ * dela) para frente. Na JANELA DEDICADA do run nada pode vir à frente: confere
+ * se a janela da aba anexada ficou em foco e, se ficou, devolve imediatamente
+ * à aba/janela do usuário (no-op nas fases de captcha/2FA/login, onde o foco
+ * é intencional, e fora do modo de janela dedicada).
+ * @param {number} tabId
+ */
+async function restoreFocusAfterAttach(tabId) {
+  try {
+    const runState = await getRunState();
+    if (!runState || runState.dedicatedWindow !== true) return;
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    const focusedWindowId = tab && typeof tab.windowId === 'number' ? tab.windowId : undefined;
+    await restoreUserFocus(runState, { focusedWindowId });
+  } catch {
+    // Melhor esforço: foco nunca derruba a execução.
+  }
+}
+
+/**
  * Anexa o depurador à aba (idempotente). Retorna false quando indisponível
  * (ex.: DevTools aberto na aba ou aviso de depuração cancelado).
  * @param {number} tabId
@@ -72,6 +94,7 @@ export async function attachCdp(tabId) {
     await chrome.debugger.attach({ tabId }, CDP_VERSION);
     attachedTabs.add(tabId);
     await ensureNewDocScript(tabId);
+    await restoreFocusAfterAttach(tabId);
     return true;
   } catch {
     // Já anexado por este SW antes de um restart, ou anexado por outro cliente:
@@ -82,6 +105,7 @@ export async function attachCdp(tabId) {
       if (target) {
         attachedTabs.add(tabId);
         await ensureNewDocScript(tabId);
+        await restoreFocusAfterAttach(tabId);
         return true;
       }
     } catch {

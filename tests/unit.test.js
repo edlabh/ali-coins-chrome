@@ -32,7 +32,13 @@ import {
   saveSurpriseTapped
 } from '../src/background/storage.js';
 import { ensureCoinPage, isCoinUrl } from '../src/background/tabs.js';
-import { clearDeviceRules, prepareRunTab, registerAuxTab, unregisterAuxTab } from '../src/background/tabs.js';
+import {
+  clearDeviceRules,
+  prepareRunTab,
+  registerAuxTab,
+  restoreUserFocus,
+  unregisterAuxTab
+} from '../src/background/tabs.js';
 import { ensureAuthenticated } from '../src/background/auth.js';
 import { applyWindowPolicy, describeReport } from '../src/background/finalize.js';
 import {
@@ -769,6 +775,79 @@ test('tabs: prepareRunTab no modo silencioso cria JANELA DEDICADA sem foco (não
     assert.equal(win.userTabId, 42, 'captura a aba do usuário antes de criar a janela');
     assert.equal(sessionData.runTabRef.dedicated, true, 'ref da janela marcada como dedicada');
     assert.equal(sessionData.runTabRef.userTabId, 42);
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+  }
+});
+
+test('tabs: restoreUserFocus devolve o foco quando a janela dedicada rouba o primeiro plano', async () => {
+  const originalChrome = globalThis.chrome;
+  const calls = [];
+  let lastFocused = { id: 77 };
+  globalThis.chrome = {
+    windows: {
+      getLastFocused: async () => lastFocused,
+      getAll: async () => [
+        { id: 1, type: 'normal' },
+        { id: 77, type: 'normal' }
+      ],
+      update: async (id, props) => {
+        calls.push({ kind: 'window', id, props });
+        return {};
+      }
+    },
+    tabs: {
+      get: async (id) => (id === 42 ? { id, windowId: 1 } : null),
+      update: async (id, props) => {
+        calls.push({ kind: 'tab', id, props });
+        return { id };
+      }
+    }
+  };
+  try {
+    const runState = {
+      windowId: 77,
+      tabId: 700,
+      userTabId: 42,
+      dedicatedWindow: true,
+      phase: 'tasks'
+    };
+    // Janela do run em foco → reativa a aba do usuário (e foca a janela dela).
+    assert.equal(await restoreUserFocus(runState), true);
+    assert.ok(
+      calls.some((c) => c.kind === 'tab' && c.id === 42 && c.props.active === true),
+      'reativa a aba do usuário'
+    );
+    assert.ok(
+      calls.some((c) => c.kind === 'window' && c.id === 1 && c.props.focused === true),
+      'foca a janela do usuário'
+    );
+
+    // Fase de captcha/2FA/login: o foco na janela do run é intencional — não devolve.
+    calls.length = 0;
+    assert.equal(await restoreUserFocus({ ...runState, phase: 'captcha' }), false);
+    assert.equal(calls.length, 0, 'não interfere nas fases que exigem o usuário');
+
+    // A janela do run NÃO está em foco → nada a fazer.
+    calls.length = 0;
+    lastFocused = { id: 1 };
+    assert.equal(await restoreUserFocus(runState), false);
+    assert.equal(calls.length, 0);
+
+    // Aba do usuário fechada no meio do run → foca outra janela normal (≠ run).
+    calls.length = 0;
+    lastFocused = { id: 77 };
+    assert.equal(await restoreUserFocus({ ...runState, userTabId: 999 }), true);
+    assert.ok(
+      calls.some((c) => c.kind === 'window' && c.id === 1 && c.props.focused === true),
+      'fallback foca outra janela normal'
+    );
+
+    // Fora da janela dedicada (modo visível) NUNCA interfere no foco.
+    calls.length = 0;
+    assert.equal(await restoreUserFocus({ ...runState, dedicatedWindow: false }), false);
+    assert.equal(calls.length, 0);
   } finally {
     if (originalChrome === undefined) delete globalThis.chrome;
     else globalThis.chrome = originalChrome;

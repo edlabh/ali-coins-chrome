@@ -5,7 +5,13 @@
 import { MSG, PHASE, pickDevice } from '../common/constants.js';
 import { startRun, requestStop } from './runner.js';
 import { installScheduler, scheduleDaily } from './scheduler.js';
-import { focusWindow, isAliexpressUrl, prepareRunTab, registerAuxTab } from './tabs.js';
+import {
+  focusWindow,
+  isAliexpressUrl,
+  prepareRunTab,
+  registerAuxTab,
+  restoreUserFocus
+} from './tabs.js';
 import { clickTrusted, forgetCdp } from './cdp.js';
 import { getRunState, getRuntime, getSettings, pushReport } from './storage.js';
 
@@ -97,6 +103,15 @@ chrome.tabs.onCreated.addListener(async (tab) => {
         await chrome.tabs.update(targetUserTab, { active: true }).catch(() => {});
       }
       await chrome.tabs.update(tab.id, { active: false }).catch(() => {});
+      // Abrir abas/janelas (inclusive as abertas pelo PRÓPRIO SITE no fluxo de
+      // popup) pode trazer a janela do run para frente: devolve o foco ao
+      // usuário se isso aconteceu — a janela dedicada nunca vem à frente.
+      if (runState.dedicatedWindow) {
+        await restoreUserFocus(
+          { ...runState, userTabId: runState.userTabId || lastUserTabId },
+          { focusedWindowId: typeof tab.windowId === 'number' ? tab.windowId : undefined }
+        ).catch(() => {});
+      }
     }
   } catch {
     // Aba já fechada: ignora.
@@ -120,6 +135,11 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
           await chrome.tabs.update(target, { active: true }).catch(() => {});
         }
         await chrome.tabs.update(tabId, { active: false }).catch(() => {});
+        if (runState.dedicatedWindow) {
+          // Ativar uma aba pode trazer a janela dela para frente: devolve o
+          // foco ao usuário imediatamente se a janela do run ficou em foco.
+          await restoreUserFocus(runState).catch(() => {});
+        }
       }
       return; // nunca memoriza abas do run como aba do usuário
     }

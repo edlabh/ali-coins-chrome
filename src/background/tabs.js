@@ -8,7 +8,7 @@
  *  - locale pt-BR herdado do perfil do usuário.
  */
 
-import { COIN_URL, COIN_URL_TASKS, pickDevice } from '../common/constants.js';
+import { COIN_URL, COIN_URL_TASKS, PHASE, pickDevice } from '../common/constants.js';
 
 const DNR_UA_RULE_ID = 9001;
 const DNR_HINTS_RULE_ID = 9002;
@@ -115,8 +115,16 @@ async function ensureRunWindow(settings, { forceVisible = false } = {}) {
         if (silent && !tab.active) {
           // Janela dedicada: a aba de execução deve ficar ATIVA dentro dela
           // (visível — a janela é que não tem foco; isso mantém a página sem
-          // estrangulamento e os beacons saudáveis).
+          // estrangulamento e os beacons saudáveis). Ativar uma aba pode trazer
+          // a janela dela para frente: devolve o foco se isso aconteceu.
           await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
+          await restoreUserFocus({
+            windowId: tab.windowId,
+            tabId: tab.id,
+            userTabId: runtimeRef.userTabId || userTabIdHint,
+            dedicatedWindow: true,
+            phase: PHASE.STARTING
+          });
         }
         if (!silent) {
           await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
@@ -167,6 +175,15 @@ async function ensureRunWindow(settings, { forceVisible = false } = {}) {
       tabId: tab.id,
       dedicated: true,
       userTabId: userTabIdHint
+    });
+    // Criar uma janela pode colocá-la à frente mesmo com `focused: false`:
+    // se a janela dedicada ficou em foco, devolve imediatamente ao usuário.
+    await restoreUserFocus({
+      windowId: win.id,
+      tabId: tab.id,
+      userTabId: userTabIdHint,
+      dedicatedWindow: true,
+      phase: PHASE.STARTING
     });
     return {
       windowId: win.id,
@@ -512,6 +529,71 @@ export async function restoreBackgroundFocus(windowId, runTabId, userTabId = nul
   } catch {
     // Ignora aba/janela fechada.
   }
+}
+
+/**
+ * Garante que a JANELA DEDICADA do run NUNCA permaneça em primeiro plano.
+ *
+ * Algumas operações nativas do Chrome (criar janelas, anexar o depurador via
+ * `chrome.debugger.attach`, abrir/ativar abas — inclusive as abertas pelo
+ * próprio site no fluxo de popup) podem trazer a janela da aba afetada para
+ * frente mesmo quando ela foi criada sem foco. Esta função confere se a janela
+ * verificada (`focusedWindowId`, padrão: a janela do run) é a última em foco e,
+ * se for, reativa a aba do usuário capturada antes do run — devolvendo o foco
+ * imediatamente.
+ *
+ * Fases que exigem o usuário (captcha, 2FA e login manual) NÃO são revertidas:
+ * nelas trazer a janela para frente é intencional (focusWindow).
+ *
+ * Atua SOMENTE na janela dedicada (`dedicatedWindow === true`): nos modos
+ * visível/popup a janela DEVE ficar em foco.
+ * @param {{windowId?: number, tabId?: number, userTabId?: (number|null), dedicatedWindow?: boolean, phase?: string}} state
+ * @param {{focusedWindowId?: number}} [options]
+ * @returns {Promise<boolean>} true quando o foco foi devolvido ao usuário
+ */
+export async function restoreUserFocus(state, { focusedWindowId } = {}) {
+  try {
+    if (!state || state.dedicatedWindow !== true) return false;
+    if (typeof state.windowId !== 'number') return false;
+    if (
+      state.phase === PHASE.CAPTCHA ||
+      state.phase === PHASE.TWO_FA ||
+      state.phase === PHASE.AUTH
+    ) {
+      return false;
+    }
+    const checkId = typeof focusedWindowId === 'number' ? focusedWindowId : state.windowId;
+    const last = await chrome.windows.getLastFocused({ populate: false }).catch(() => null);
+    if (!last || last.id !== checkId) return false;
+    const targetId = typeof state.userTabId === 'number' ? state.userTabId : null;
+    if (targetId && targetId !== state.tabId) {
+      const targetTab = await chrome.tabs.get(targetId).catch(() => null);
+      if (targetTab) {
+        await chrome.tabs.update(targetId, { active: true }).catch(() => {});
+        if (typeof targetTab.windowId === 'number') {
+          // Reativa também a JANELA do usuário: se a aba já estava ativa, só
+          // `tabs.update` pode não devolver o foco à janela.
+          await chrome.windows.update(targetTab.windowId, { focused: true }).catch(() => {});
+        }
+        return true;
+      }
+    }
+    // Sem a aba do usuário (fechada durante o run): foca outra janela normal —
+    // nunca a janela do run nem a janela que acabou de roubar o foco.
+    const wins = await chrome.windows
+      .getAll({ populate: false, windowTypes: ['normal'] })
+      .catch(() => []);
+    const other = wins.find(
+      (w) => w && typeof w.id === 'number' && w.id !== state.windowId && w.id !== checkId
+    );
+    if (other) {
+      await chrome.windows.update(other.id, { focused: true }).catch(() => {});
+      return true;
+    }
+  } catch {
+    // Melhor esforço: foco nunca derruba a execução.
+  }
+  return false;
 }
 
 const RUNTIME_TAB_KEY = 'runTabRef';

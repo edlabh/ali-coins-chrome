@@ -54,9 +54,11 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
      não contam progresso); o extrato mostra o **diagnóstico de beacons/visibilidade** da ficha;
    - **Modo silencioso** (**padrão**): executa em uma **JANELA DEDICADA de fundo**
      (criada sem foco) — todas as abas do run (central, tarefas, fichas que o site
-     abre) vivem nela e **suas janelas/abas não são tocadas**; a janela só vem para
-     frente se um captcha/2FA precisar de você (ou para abrir o login da versão
-     desktop quando a sessão expirar); desmarque para acompanhar numa janela visível;
+     abre) vivem nela e **suas janelas/abas não são tocadas**; a janela **nunca é
+     trazida para o primeiro plano** durante a execução (o foco é devolvido a você
+     mesmo após abas/attach do depurador) — ela só vem para frente se um
+     captcha/2FA precisar de você (ou para abrir o login da versão desktop quando a
+     sessão expirar); desmarque para acompanhar numa janela visível;
    - **Notificação condicional** (opcional): avisar apenas quando houver novidade
      (check-in novo, crédito do dia ou tarefas executadas) — erros sempre avisam;
    - **Log detalhado** (opcional): o extrato de cada execução é **resumido por padrão**
@@ -191,7 +193,10 @@ Decisões de projeto relevantes:
   nova, como na v0.3.3 e no projeto de origem) — dentro da janela dedicada — e
   são **fechadas ao fim de cada tarefa**; ao concluir, a janela dedicada é
   fechada. Limitação honesta: **não existe "headless" real para extensões** — o
-  Chrome precisa estar aberto e a janela dedicada existe (sem foco); se um
+  Chrome precisa estar aberto e a janela dedicada existe (sem foco); anexar o
+  depurador e abrir/ativar abas são operações nativas que podem trazer a janela
+  para frente — a extensão confere o foco na hora e o devolve a você, então a
+  janela dedicada permanece em segundo plano do início ao fim; se um
   captcha/2FA/login exigir sua ação, ela é trazida para frente automaticamente e
   volta ao fundo depois.
 - **Captcha**: a resolução é sempre manual (a extensão não tenta deslizar o desafio).
