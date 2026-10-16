@@ -102,18 +102,15 @@ async function adoptTaskTab(ctx) {
   // a rodada era queimada sem nenhum toque).
   let candidate = null;
   for (let attempt = 0; attempt < 6 && !candidate; attempt += 1) {
-    // A aba da tarefa pode nascer em OUTRA janela (popup com features): além
-    // da janela do run, olha todas as janelas priorizando as abas cujo opener
-    // é a aba de execução (paridade com o context.on('page') da referência).
+    // A aba da tarefa pode nascer em OUTRA janela (popup com features): olha a
+    // aba pelo OPENER (qualquer janela) e as abas da JANELA DO RUN. Sem
+    // fallback global por URL — com a janela dedicada, abas do USUÁRIO nunca
+    // são adotadas (nem fechadas depois).
     const windowTabs = await chrome.tabs.query({ windowId: ctx.windowId }).catch(() => []);
     const allTabs = await chrome.tabs.query({}).catch(() => []);
     const seen = new Set();
     const tabs = [];
-    for (const t of [
-      ...allTabs.filter((x) => x && x.openerTabId === ctx.tabId),
-      ...windowTabs,
-      ...allTabs
-    ]) {
+    for (const t of [...allTabs.filter((x) => x && x.openerTabId === ctx.tabId), ...windowTabs]) {
       if (!t || !t.id || seen.has(t.id)) continue;
       seen.add(t.id);
       tabs.push(t);

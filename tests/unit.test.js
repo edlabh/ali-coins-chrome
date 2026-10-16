@@ -32,7 +32,7 @@ import {
   saveSurpriseTapped
 } from '../src/background/storage.js';
 import { ensureCoinPage, isCoinUrl } from '../src/background/tabs.js';
-import { clearDeviceRules, registerAuxTab, unregisterAuxTab } from '../src/background/tabs.js';
+import { clearDeviceRules, prepareRunTab, registerAuxTab, unregisterAuxTab } from '../src/background/tabs.js';
 import { ensureAuthenticated } from '../src/background/auth.js';
 import { applyWindowPolicy, describeReport } from '../src/background/finalize.js';
 import {
@@ -714,6 +714,56 @@ test('storage: memória diária da surpresa (por dia contábil LA, sem vazar ent
       0,
       'a memória de outro dia não vaza'
     );
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+  }
+});
+
+test('tabs: prepareRunTab no modo silencioso cria JANELA DEDICADA sem foco (não usa a do usuário)', async () => {
+  const originalChrome = globalThis.chrome;
+  const created = [];
+  const sessionData = {};
+  globalThis.chrome = {
+    storage: {
+      session: {
+        get: async (key) => ({ [key]: sessionData[key] }),
+        set: async (obj) => {
+          Object.assign(sessionData, obj);
+        },
+        remove: async (key) => {
+          delete sessionData[key];
+        }
+      },
+      local: { get: async () => ({}), set: async () => {} }
+    },
+    windows: {
+      getLastFocused: async () => ({ id: 1, type: 'normal' }),
+      create: async (opts) => {
+        created.push(opts);
+        return { id: 77, tabs: [{ id: 700 }] };
+      },
+      update: async () => ({}),
+      get: async () => ({ id: 77, type: 'normal' })
+    },
+    tabs: {
+      // Aba do USUÁRIO (capturada antes de criar a janela dedicada).
+      query: async () => [{ id: 42, active: true }],
+      get: async (id) => ({ id, status: 'complete', url: 'about:blank', windowId: 77 }),
+      update: async () => ({}),
+      create: async () => ({ id: 700 })
+    },
+    declarativeNetRequest: { updateSessionRules: async () => {} }
+  };
+  try {
+    const win = await prepareRunTab({ silentMode: true }, {});
+    assert.equal(created.length, 1, 'cria UMA janela de execução');
+    assert.equal(created[0].type, 'normal', 'janela dedicada (normal), não a do usuário');
+    assert.equal(created[0].focused, false, 'nasce SEM foco (não interfere no usuário)');
+    assert.equal(win.dedicated, true);
+    assert.equal(win.userTabId, 42, 'captura a aba do usuário antes de criar a janela');
+    assert.equal(sessionData.runTabRef.dedicated, true, 'ref da janela marcada como dedicada');
+    assert.equal(sessionData.runTabRef.userTabId, 42);
   } finally {
     if (originalChrome === undefined) delete globalThis.chrome;
     else globalThis.chrome = originalChrome;

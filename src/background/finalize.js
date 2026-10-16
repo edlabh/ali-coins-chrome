@@ -111,14 +111,17 @@ export async function applyWindowPolicy(ctx, settings) {
     return;
   }
 
-  // Modo silencioso: a aba vive em uma janela normal do usuário — NUNCA fechar
-  // a janela dele; no máximo a própria aba de execução (e uma janela popup
-  // vazia, caso a aba tenha sido reaproveitada de uma abertura manual).
+  // Modo silencioso: com a JANELA DEDICADA, fechamos a janela inteira ao
+  // concluir (todas as abas do run vivem nela — nada do usuário é tocado).
+  // Em refs legados (aba em janela do usuário), fecha apenas a aba de execução.
   if (settings.silentMode) {
     if (settings.keepWindowOpen) {
-      await appendLog(ctx, 'Modo silencioso: aba de execução mantida aberta (configuração).', {
+      await appendLog(ctx, 'Modo silencioso: janela dedicada de execução mantida aberta (configuração).', {
         detail: true
       });
+    } else if (ctx.dedicatedWindow && ctx.windowId) {
+      await appendLog(ctx, 'Concluído — fechando a janela dedicada de execução.', { detail: true });
+      await chrome.windows.remove(ctx.windowId).catch(() => {});
     } else if (ctx.tabId) {
       await appendLog(ctx, 'Concluído — fechando a aba de execução (modo silencioso).', { detail: true });
       const tabInfo = await chrome.tabs.get(ctx.tabId).catch(() => null);

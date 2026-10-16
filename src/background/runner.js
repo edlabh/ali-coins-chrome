@@ -176,24 +176,31 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
       onTabCreated: async (createdWin) => {
         ctx.windowId = createdWin.windowId;
         ctx.tabId = createdWin.tabId;
+        // Janela dedicada (modo silencioso): a "aba do usuário" foi capturada
+        // ANTES de criá-la — as janelas/abas do usuário não são tocadas.
+        ctx.dedicatedWindow = Boolean(createdWin.dedicated);
         try {
           const windowTabs = await chrome.tabs.query({ windowId: ctx.windowId });
           ctx.knownTabIds = new Set(windowTabs.map((t) => t.id).filter(Boolean));
         } catch {
           ctx.knownTabIds = new Set();
         }
-        let userTabId = null;
-        try {
-          const activeTabs = await chrome.tabs.query({ active: true, windowId: ctx.windowId });
-          const other = activeTabs.find((t) => t.id && t.id !== ctx.tabId);
-          userTabId = other ? other.id : null;
-        } catch {
-          // mantém null
+        let userTabId =
+          typeof createdWin.userTabId === 'number' ? createdWin.userTabId : null;
+        if (!userTabId) {
+          try {
+            const activeTabs = await chrome.tabs.query({ active: true, windowId: ctx.windowId });
+            const other = activeTabs.find((t) => t.id && t.id !== ctx.tabId);
+            userTabId = other ? other.id : null;
+          } catch {
+            // mantém null
+          }
         }
         ctx.userTabId = userTabId;
         await patchRunState({
           tabId: ctx.tabId,
           windowId: ctx.windowId,
+          dedicatedWindow: ctx.dedicatedWindow,
           knownTabIds: [...ctx.knownTabIds],
           userTabId
         });
@@ -210,7 +217,7 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
     await appendLog(
       ctx,
       ctx.settings.silentMode
-        ? 'Modo silencioso: execução em segundo plano (nenhuma janela/aba em primeiro plano).'
+        ? 'Modo silencioso: execução em segundo plano numa janela dedicada (sem interferir nas suas janelas/abas).'
         : 'Janela mobile (Pixel 8) preparada com as regras de User-Agent.',
       { detail: true }
     );

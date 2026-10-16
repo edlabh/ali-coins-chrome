@@ -64,9 +64,10 @@ export async function consumeItemTab(
 
   let itemTab = null;
   while (Date.now() < deadline) {
-    // P4: detecção GLOBAL (não só na janela do run) — cliques em janela popup
-    // podem abrir a ficha na janela normal; preferimos a aba cujo opener é a
-    // aba de execução, com fallback para uma aba AliExpress nova.
+    // P4: detecção com prioridade segura — a aba cujo OPENER é a aba de
+    // execução (qualquer janela) e, em seguida, as abas da PRÓPRIA janela do
+    // run. Nunca usa o fallback global por URL: com a janela dedicada, abas do
+    // USUÁRIO jamais entram na conta (não são adotadas nem fechadas).
     const tabs = await chrome.tabs.query({}).catch(() => []);
     const candidates = tabs.filter(
       (t) =>
@@ -80,7 +81,9 @@ export async function consumeItemTab(
     itemTab =
       candidates.find((t) => t.openerTabId === runState.tabId) ||
       candidates.find(
-        (t) => isAliexpressUrl(t.url || '') || isAliexpressUrl(t.pendingUrl || '')
+        (t) =>
+          t.windowId === windowId &&
+          (isAliexpressUrl(t.url || '') || isAliexpressUrl(t.pendingUrl || ''))
       ) ||
       null;
     if (itemTab) break;

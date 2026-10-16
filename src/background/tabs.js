@@ -61,38 +61,82 @@ function dnrCondition(tabIds) {
 }
 
 /**
- * Garante que temos uma janela/aba de execução válida.
- *  - modo normal: janela popup visível dimensionada como o aparelho;
- *  - modo silencioso (`silentMode`): ABA DE FUNDO na última janela em uso,
- *    sem abrir nada — a emulação de viewport é aplicada por CDP (cdp.js).
- * Reutiliza a aba existente quando ela ainda aponta para o AliExpress (ou está
- * em branco, aguardando a primeira navegação).
+ * Captura a aba ativa da última janela normal em foco — a "aba do usuário"
+ * que recebe o foco de volta se algo do run precisar disputá-lo. Feita ANTES
+ * de qualquer janela de execução ser criada.
+ * @returns {Promise<number|null>}
+ */
+async function captureUserTabId() {
+  try {
+    const win = await chrome.windows.getLastFocused({ populate: false, windowTypes: ['normal'] });
+    if (win && typeof win.id === 'number') {
+      const tabs = await chrome.tabs.query({ active: true, windowId: win.id });
+      const active = tabs.find((t) => t && t.id);
+      return active ? active.id : null;
+    }
+  } catch {
+    // segue sem dica de aba do usuário
+  }
+  return null;
+}
+
+/**
+ * Garante a janela/aba de execução.
+ *  - modo silencioso (`silentMode`, padrão): **JANELA DEDICADA** própria
+ *    (normal, criada SEM foco) — todas as abas do run (central, tarefas,
+ *    fichas abertas pelo site) vivem nela e as janelas/abas do USUÁRIO não são
+ *    tocadas; nada rouba o foco;
+ *  - modo visível (`forceVisible`/"Abrir janela mobile" ou silentMode off):
+ *    janela popup dimensionada como o aparelho.
+ * Reutiliza a janela/aba quando ela ainda aponta para o AliExpress (ou está em
+ * branco) e pertence à execução.
  * @param {object} settings
  * @param {{forceVisible?: boolean}} [options]
- * @returns {Promise<{windowId: number, tabId: number, reused: boolean}>}
+ * @returns {Promise<{windowId: number, tabId: number, reused: boolean, dedicated: boolean, userTabId: (number|null)}>}
  */
 async function ensureRunWindow(settings, { forceVisible = false } = {}) {
   const silent = Boolean(settings.silentMode) && !forceVisible;
+  const userTabIdHint = await captureUserTabId();
   const runtimeRef = await getRuntimeTab();
 
   if (runtimeRef) {
     try {
       const tab = await chrome.tabs.get(runtimeRef.tabId);
       const url = (tab && tab.url) || '';
-      if (tab && tab.windowId && (isAliexpressUrl(url) || isBlankUrl(url))) {
-        const win = await chrome.windows.get(tab.windowId).catch(() => null);
-        // Em modo silencioso, NUNCA reutiliza uma janela popup (sem barra de
-        // abas: cliques do site dentro de popup são abertos pelo Chrome como
-        // novas abas em primeiro plano na janela normal do usuário).
-        if (silent && win && win.type !== 'normal') {
-          await chrome.windows.remove(win.id).catch(() => {});
-        } else {
-          if (!silent) {
-            await chrome.windows.update(tab.windowId, { focused: true });
-          } else if (tab.active) {
-            await chrome.tabs.update(tab.id, { active: false }).catch(() => {});
-          }
-          return { windowId: tab.windowId, tabId: tab.id, reused: true };
+      const refIsDedicated = Boolean(runtimeRef.dedicated);
+      if (
+        tab &&
+        tab.windowId &&
+        (isAliexpressUrl(url) || isBlankUrl(url)) &&
+        // Modo silencioso só reutiliza a JANELA DEDICADA do run (nunca uma aba
+        // do usuário ou popup antigo); demais modos reutilizam normalmente.
+        (silent ? refIsDedicated : true)
+      ) {
+        if (silent && !tab.active) {
+          // Janela dedicada: a aba de execução deve ficar ATIVA dentro dela
+          // (visível — a janela é que não tem foco; isso mantém a página sem
+          // estrangulamento e os beacons saudáveis).
+          await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
+        }
+        if (!silent) {
+          await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+        }
+        return {
+          windowId: tab.windowId,
+          tabId: tab.id,
+          reused: true,
+          dedicated: refIsDedicated,
+          userTabId: runtimeRef.userTabId || userTabIdHint
+        };
+      }
+      // Ref legado do modo silencioso (aba do run numa janela do USUÁRIO):
+      // fecha a aba antiga e recria na janela dedicada — não deixa lixo na
+      // janela do usuário.
+      if (tab && tab.id && silent && !refIsDedicated) {
+        await chrome.tabs.remove(tab.id).catch(() => {});
+        const oldWin = await chrome.windows.get(tab.windowId).catch(() => null);
+        if (oldWin && oldWin.type === 'popup') {
+          await chrome.windows.remove(oldWin.id).catch(() => {});
         }
       }
     } catch {
@@ -101,10 +145,36 @@ async function ensureRunWindow(settings, { forceVisible = false } = {}) {
   }
 
   if (silent) {
-    const windowId = await findAnchorWindow();
-    const tab = await chrome.tabs.create({ windowId, url: 'about:blank', active: false });
-    await setRuntimeTab({ windowId, tabId: tab.id });
-    return { windowId, tabId: tab.id, reused: false };
+    // Janela DEDICADA: própria, normal, SEM foco. As abas abertas pelo site
+    // (adclick/ficha/feed) nascem aqui dentro — as janelas do usuário ficam
+    // intocadas e sem interferência de foco.
+    const device = pickDevice(settings);
+    const win = await chrome.windows.create({
+      url: 'about:blank',
+      type: 'normal',
+      focused: false,
+      width: Math.max(440, device.width + 40),
+      height: Math.min(1000, device.height + 60),
+      left: 40,
+      top: 40
+    });
+    const tab = (win.tabs && win.tabs[0]) || null;
+    if (!tab || typeof tab.id !== 'number') {
+      throw new Error('Falha ao criar a janela de execução.');
+    }
+    await setRuntimeTab({
+      windowId: win.id,
+      tabId: tab.id,
+      dedicated: true,
+      userTabId: userTabIdHint
+    });
+    return {
+      windowId: win.id,
+      tabId: tab.id,
+      reused: false,
+      dedicated: true,
+      userTabId: userTabIdHint
+    };
   }
 
   const device = pickDevice(settings);
@@ -121,34 +191,19 @@ async function ensureRunWindow(settings, { forceVisible = false } = {}) {
   if (!tab || typeof tab.id !== 'number') {
     throw new Error('Falha ao criar a janela de execução.');
   }
-  await setRuntimeTab({ windowId: win.id, tabId: tab.id });
-  return { windowId: win.id, tabId: tab.id, reused: false };
-}
-
-/**
- * Janela-âncora para o modo silencioso: a última janela em foco; se não houver,
- * a primeira normal; em último caso, cria uma janela minimizada (invisível).
- * @returns {Promise<number>}
- */
-async function findAnchorWindow() {
-  try {
-    const win = await chrome.windows.getLastFocused({ populate: false, windowTypes: ['normal'] });
-    if (win && typeof win.id === 'number') return win.id;
-  } catch {
-    // segue
-  }
-  try {
-    const wins = await chrome.windows.getAll({ windowTypes: ['normal'] });
-    if (wins.length > 0 && typeof wins[0].id === 'number') return wins[0].id;
-  } catch {
-    // segue
-  }
-  const created = await chrome.windows.create({
-    url: 'about:blank',
-    state: 'minimized',
-    focused: false
+  await setRuntimeTab({
+    windowId: win.id,
+    tabId: tab.id,
+    dedicated: false,
+    userTabId: userTabIdHint
   });
-  return created.id;
+  return {
+    windowId: win.id,
+    tabId: tab.id,
+    reused: false,
+    dedicated: false,
+    userTabId: userTabIdHint
+  };
 }
 
 /**
@@ -437,8 +492,15 @@ export async function restoreBackgroundFocus(windowId, runTabId, userTabId = nul
   try {
     let targetId = userTabId;
     if (!targetId && windowId) {
+      // 1) uma aba que não seja do AliExpress na MESMA janela do run;
+      // 2) fallback: qualquer aba fora do AliExpress no navegador (modo de
+      //    JANELA DEDICADA — a janela do run só tem abas do run).
       const tabs = await chrome.tabs.query({ windowId }).catch(() => []);
-      const other = tabs.find((t) => t.id && t.id !== runTabId && !isAliexpressUrl(t.url || ''));
+      let other = tabs.find((t) => t.id && t.id !== runTabId && !isAliexpressUrl(t.url || ''));
+      if (!other) {
+        const all = await chrome.tabs.query({}).catch(() => []);
+        other = all.find((t) => t.id && t.id !== runTabId && !isAliexpressUrl(t.url || ''));
+      }
       if (other) targetId = other.id;
     }
     if (targetId && targetId !== runTabId) {

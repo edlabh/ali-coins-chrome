@@ -88,13 +88,12 @@ chrome.tabs.onCreated.addListener(async (tab) => {
 
     // Fluxo restaurado (v0.4.5, igual à v0.3.3 + projeto de origem): a página da
     // tarefa DEVE abrir na própria aba/nova aba do site — é assim que o
-    // AliExpress contabiliza a visita. O guarda apenas mantém o foco na SUA aba
-    // e força a nova aba para segundo plano; ela será adotada pelo loop de
-    // tarefas (adoptTaskTab) e fechada ao fim da rodada (restoreTaskTab). Abas
-    // realmente órfãs são limpas por closeOrphanTabs entre as tarefas.
+    // AliExpress contabiliza a visita. Com a JANELA DEDICADA (modo silencioso),
+    // as abas do site nascem dentro dela e o foco do usuário nem é disputado;
+    // nos casos legados, o guarda mantém o foco na aba do usuário.
     if (shouldKeepSilent(runState)) {
       const targetUserTab = runState.userTabId || lastUserTabId;
-      if (targetUserTab && targetUserTab !== tab.id) {
+      if (!runState.dedicatedWindow && targetUserTab && targetUserTab !== tab.id) {
         await chrome.tabs.update(targetUserTab, { active: true }).catch(() => {});
       }
       await chrome.tabs.update(tab.id, { active: false }).catch(() => {});
@@ -115,7 +114,9 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
     if (isRunOwnedTab(tabId, tab, runState)) {
       if (shouldKeepSilent(runState)) {
         const target = runState.userTabId || lastUserTabId;
-        if (target && target !== tabId) {
+        // Janela dedicada: o foco do usuário nunca é disputado — basta manter a
+        // aba do run desativada dentro da janela dela.
+        if (!runState.dedicatedWindow && target && target !== tabId) {
           await chrome.tabs.update(target, { active: true }).catch(() => {});
         }
         await chrome.tabs.update(tabId, { active: false }).catch(() => {});

@@ -52,10 +52,11 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
      **contexto mobile já na criação da aba** (sem reload), os cliques têm **hit-test**
      contra overlays, há fallback de detalhe e memória diária de cards (itens repetidos
      não contam progresso); o extrato mostra o **diagnóstico de beacons/visibilidade** da ficha;
-   - **Modo silencioso** (**padrão**): executa em uma **aba de fundo, sem abrir
-     janela** — a aba só vem para frente se um captcha/2FA precisar de você (ou para
-     abrir o login da versão desktop quando a sessão expirar);
-     desmarque para acompanhar a execução numa janela visível;
+   - **Modo silencioso** (**padrão**): executa em uma **JANELA DEDICADA de fundo**
+     (criada sem foco) — todas as abas do run (central, tarefas, fichas que o site
+     abre) vivem nela e **suas janelas/abas não são tocadas**; a janela só vem para
+     frente se um captcha/2FA precisar de você (ou para abrir o login da versão
+     desktop quando a sessão expirar); desmarque para acompanhar numa janela visível;
    - **Notificação condicional** (opcional): avisar apenas quando houver novidade
      (check-in novo, crédito do dia ou tarefas executadas) — erros sempre avisam;
    - **Log detalhado** (opcional): o extrato de cada execução é **resumido por padrão**
@@ -178,17 +179,19 @@ Decisões de projeto relevantes:
   exibe um **aviso de depuração** na janela de execução enquanto ela estiver aberta
   — não cancele, é o mecanismo que aplica os cliques. Se o aviso for cancelado, a
   extensão cai sozinha no fallback com eventos sintéticos.
-- **Modo silencioso (segundo plano, padrão)**: a execução ocorre numa **aba de fundo**
-  (criada inativa na última janela em uso) — nada de janela nova na tela. Como a
-  aba não tem o tamanho físico do aparelho, a viewport do Pixel 8 é emulada via
-  CDP (`Emulation.setDeviceMetricsOverride` 412×915 + toque + foco), e o próprio
-  depurador impede o congelamento da aba em segundo plano. As páginas de tarefa
-  abrem **no fluxo nativo do site** (aba nova, como na v0.3.3 e no projeto de
-  origem) — o guarda de abas **desativa a aba na hora** e devolve o foco para
-  você, e a aba é **fechada ao fim de cada tarefa**. Limitação honesta:
-  **não existe "headless" real para extensões** — o Chrome precisa estar aberto e
-  a aba existe (oculta); se um captcha/2FA/login exigir sua ação, a aba é trazida
-  para frente automaticamente e volta ao fundo depois.
+- **Modo silencioso (segundo plano, padrão)**: a execução ocorre numa **JANELA
+  DEDICADA** (normal, criada **sem foco**) — todas as abas do run (central,
+  tarefas, fichas que o site abre) vivem nela e **suas janelas/abas não são
+  tocadas nem perdem o foco**. Como a aba não tem o tamanho físico do aparelho, a
+  viewport do Pixel 8 é emulada via CDP (`Emulation.setDeviceMetricsOverride`
+  412×915 + toque + foco), e o próprio depurador impede o congelamento da aba em
+  segundo plano. As páginas de tarefa abrem **no fluxo nativo do site** (aba
+  nova, como na v0.3.3 e no projeto de origem) — dentro da janela dedicada — e
+  são **fechadas ao fim de cada tarefa**; ao concluir, a janela dedicada é
+  fechada. Limitação honesta: **não existe "headless" real para extensões** — o
+  Chrome precisa estar aberto e a janela dedicada existe (sem foco); se um
+  captcha/2FA/login exigir sua ação, ela é trazida para frente automaticamente e
+  volta ao fundo depois.
 - **Captcha**: a resolução é sempre manual (a extensão não tenta deslizar o desafio).
   Detecção por `#nc_1_n1z`, `.btn_slide`, containers `nocaptcha`/`baxia` e iframes.
   Sem tempo máximo: resolve ou cancele pelo popup.
