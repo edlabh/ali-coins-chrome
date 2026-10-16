@@ -33,7 +33,7 @@ export async function readLedger(ctx, label) {
     const bits = [`saldo ${res.totalBalance ?? 'N/D'}`];
     if (Number.isFinite(res.todayMissionsCoins)) bits.push(`missões de hoje +${res.todayMissionsCoins}`);
     if (res.hasCheckinToday) bits.push('check-in de hoje creditado no extrato');
-    await appendLog(ctx, `Extrato (${label}): ${bits.join(', ')}.`);
+    await appendLog(ctx, `Extrato (${label}): ${bits.join(', ')}.`, { detail: true });
     return res;
   } catch (err) {
     await appendLog(ctx, `Falha ao ler o extrato (${label}): ${err.message}.`);

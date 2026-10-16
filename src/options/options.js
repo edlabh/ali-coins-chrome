@@ -144,6 +144,7 @@ async function load() {
   $('silentMode').checked = Boolean(s.silentMode);
   $('notifications').checked = s.notifications !== false;
   $('notifyOnlyOnChange').checked = Boolean(s.notifyOnlyOnChange);
+  $('verboseLog').checked = Boolean(s.verboseLog);
 }
 
 function toInt(value, fallback) {
@@ -183,7 +184,8 @@ async function save() {
     keepWindowOpen: $('keepWindowOpen').checked,
     silentMode: $('silentMode').checked,
     notifications: $('notifications').checked,
-    notifyOnlyOnChange: $('notifyOnlyOnChange').checked
+    notifyOnlyOnChange: $('notifyOnlyOnChange').checked,
+    verboseLog: $('verboseLog').checked
   };
 
   try {

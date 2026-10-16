@@ -25,10 +25,16 @@ export class RunBlockedError extends Error {
 /**
  * Anexa uma linha ao extrato da execução (persistido no run state para o popup
  * acompanhar ao vivo e para o relatório final no histórico).
+ *
+ * Por padrão o extrato é RESUMIDO: as linhas marcadas como `detail` (navegação
+ * de abas, beacons, adoção, diagnósticos) só são registradas quando o
+ * "Log detalhado" estiver ativo nas Opções (`settings.verboseLog`).
  * @param {object} ctx
  * @param {string} message
+ * @param {{detail?: boolean}} [options]
  */
-export async function appendLog(ctx, message) {
+export async function appendLog(ctx, message, { detail = false } = {}) {
+  if (detail && !(ctx && ctx.settings && ctx.settings.verboseLog)) return;
   if (!ctx || !Array.isArray(ctx.log)) return;
   ctx.log.push({ t: Date.now(), msg: String(message).slice(0, 220) });
   if (ctx.log.length > RUN_LOG_LIMIT) {

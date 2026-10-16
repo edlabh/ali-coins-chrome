@@ -138,7 +138,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
   notifications: true,
   // Notificação de conclusão apenas quando houver novidade (check-in novo,
   // crédito do dia no extrato ou ações de tarefas). Erros sempre notificam.
-  notifyOnlyOnChange: false
+  notifyOnlyOnChange: false,
+  // Registro de execução: por padrão o extrato é RESUMIDO. O "Log detalhado"
+  // registra também as linhas de diagnóstico (navegação/adoção de abas,
+  // beacons das fichas, leitura do extrato, surpresas etc.).
+  verboseLog: false
 });
 
 export const RUN_HISTORY_LIMIT = 20;

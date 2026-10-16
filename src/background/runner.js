@@ -211,7 +211,8 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
       ctx,
       ctx.settings.silentMode
         ? 'Modo silencioso: execução em segundo plano (nenhuma janela/aba em primeiro plano).'
-        : 'Janela mobile (Pixel 8) preparada com as regras de User-Agent.'
+        : 'Janela mobile (Pixel 8) preparada com as regras de User-Agent.',
+      { detail: true }
     );
     await appendLog(
       ctx,
@@ -225,7 +226,8 @@ export async function startRun({ reason = 'manual', manual = false } = {}) {
           ctx,
           emuOk
             ? 'Emulação de viewport 412×915 aplicada à aba de fundo.'
-            : 'Emulação de viewport indisponível; o layout pode variar no modo silencioso.'
+            : 'Emulação de viewport indisponível; o layout pode variar no modo silencioso.',
+          { detail: true }
         );
       } else {
         await appendLog(

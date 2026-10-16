@@ -24,7 +24,7 @@ import {
   SETTINGS_VERSION,
   shouldScheduleRetry
 } from '../src/common/state-utils.js';
-import { sendCmd, isNoContentScriptError } from '../src/background/context.js';
+import { sendCmd, isNoContentScriptError, appendLog } from '../src/background/context.js';
 import { getRunState, patchRunState, saveSettings as saveSettingsStorage } from '../src/background/storage.js';
 import {
   accountingDateKey,
@@ -594,6 +594,41 @@ test('storage: saveSettings descarta campos legados (credenciais/cooldown) e man
     assert.equal(localData.settings.passwordEnc, undefined);
     assert.equal(localData.settings.riskCooldownHours, undefined);
     assert.equal(localData.settings.settingsVersion, SETTINGS_VERSION);
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+  }
+});
+
+test('context: appendLog resume por padrão e só mostra diagnósticos com "Log detalhado"', async () => {
+  const originalChrome = globalThis.chrome;
+  let sessionData = {};
+  globalThis.chrome = {
+    storage: {
+      session: {
+        get: async (key) => ({ [key]: sessionData[key] }),
+        set: async (obj) => {
+          sessionData = { ...sessionData, ...obj };
+        },
+        remove: async (key) => {
+          delete sessionData[key];
+        }
+      }
+    }
+  };
+  try {
+    // Padrão (resumido): linhas de diagnóstico não entram no extrato.
+    const resumido = { runId: 'r1', settings: {}, log: [] };
+    await appendLog(resumido, 'linha importante');
+    await appendLog(resumido, 'linha de diagnóstico', { detail: true });
+    assert.equal(resumido.log.length, 1, 'detalhes são omitidos por padrão');
+    assert.equal(resumido.log[0].msg, 'linha importante');
+
+    // Com o Log detalhado ativo: tudo entra.
+    const detalhado = { runId: 'r2', settings: { verboseLog: true }, log: [] };
+    await appendLog(detalhado, 'linha de diagnóstico', { detail: true });
+    assert.equal(detalhado.log.length, 1, 'com Log detalhado, os diagnósticos aparecem');
+    assert.equal(detalhado.log[0].msg, 'linha de diagnóstico');
   } finally {
     if (originalChrome === undefined) delete globalThis.chrome;
     else globalThis.chrome = originalChrome;

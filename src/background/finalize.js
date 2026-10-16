@@ -38,7 +38,7 @@ export async function runFinalAccounting(ctx, checkin, initialBalanceForTasks, p
     await ensureCoinPage(ctx, true);
     const balanceRead = await commandWithCaptcha(ctx, CMD.READ_BALANCE, {}, 'balance');
     balanceAfter = toNumberOrNull(balanceRead.balance);
-    await appendLog(ctx, 'Saldo final lido na página mobile (extrato indisponível).');
+    await appendLog(ctx, 'Saldo final lido na página mobile (extrato indisponível).', { detail: true });
   }
 
   // Ganho de tarefas: delta de saldo (base pós-checkin, como o ali-coins), com a
@@ -116,9 +116,11 @@ export async function applyWindowPolicy(ctx, settings) {
   // vazia, caso a aba tenha sido reaproveitada de uma abertura manual).
   if (settings.silentMode) {
     if (settings.keepWindowOpen) {
-      await appendLog(ctx, 'Modo silencioso: aba de execução mantida aberta (configuração).');
+      await appendLog(ctx, 'Modo silencioso: aba de execução mantida aberta (configuração).', {
+        detail: true
+      });
     } else if (ctx.tabId) {
-      await appendLog(ctx, 'Concluído — fechando a aba de execução (modo silencioso).');
+      await appendLog(ctx, 'Concluído — fechando a aba de execução (modo silencioso).', { detail: true });
       const tabInfo = await chrome.tabs.get(ctx.tabId).catch(() => null);
       await chrome.tabs.remove(ctx.tabId).catch(() => {});
       if (tabInfo) {
@@ -138,11 +140,11 @@ export async function applyWindowPolicy(ctx, settings) {
   }
 
   if (settings.keepWindowOpen) {
-    await appendLog(ctx, 'Janela mobile mantida aberta (configuração).');
+    await appendLog(ctx, 'Janela mobile mantida aberta (configuração).', { detail: true });
     await closeLedgerTab();
     return;
   }
-  await appendLog(ctx, 'Concluído — fechando a janela mobile.');
+  await appendLog(ctx, 'Concluído — fechando a janela mobile.', { detail: true });
   await closeLedgerTab();
   await chrome.windows.remove(ctx.windowId).catch(() => {});
   await clearDeviceRules().catch(() => {});

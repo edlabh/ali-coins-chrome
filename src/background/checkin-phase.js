@@ -40,7 +40,7 @@ export async function runCheckinPhase(ctx, auth) {
     await updatePhase(PHASE.CHECKIN, 'Lendo o extrato de moedas…');
     earlyLedger = await readLedger(ctx, 'leitura inicial');
   } else {
-    await appendLog(ctx, 'Extrato inicial dispensado (sessão recém-autenticada).');
+    await appendLog(ctx, 'Extrato inicial dispensado (sessão recém-autenticada).', { detail: true });
   }
   const assumeCollected = Boolean(earlyLedger && earlyLedger.hasCheckinToday);
 
@@ -70,7 +70,9 @@ export async function runCheckinPhase(ctx, auth) {
   if (mobileCheckin.justCollected || !earlyLedger || earlyLedger.totalBalance === null) {
     postLedger = await readLedger(ctx, 'pós check-in');
   } else {
-    await appendLog(ctx, 'Extrato reaproveitado da leitura inicial (nada coletado neste run).');
+    await appendLog(ctx, 'Extrato reaproveitado da leitura inicial (nada coletado neste run).', {
+      detail: true
+    });
   }
 
   const runtimeState = await getRuntime();
@@ -93,7 +95,8 @@ export async function runCheckinPhase(ctx, auth) {
   // (1..7) da sequência real (ex.: 240) em caso de leitura suspeita.
   await appendLog(
     ctx,
-    `Sequência (fontes): mobile=${mobileCheckin.streak ?? 'N/D'}, extrato=${acct.statementStreak ?? 'N/D'}, consolidado=${previousStreak ?? 'N/D'} → ${acct.streakDays}.`
+    `Sequência (fontes): mobile=${mobileCheckin.streak ?? 'N/D'}, extrato=${acct.statementStreak ?? 'N/D'}, consolidado=${previousStreak ?? 'N/D'} → ${acct.streakDays}.`,
+    { detail: true }
   );
 
   if (acct.justCollected) {

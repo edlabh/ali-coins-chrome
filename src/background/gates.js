@@ -26,7 +26,9 @@ export async function captchaGate(ctx, origin) {
   await updatePhase(PHASE.CAPTCHA, 'Aguardando você resolver o captcha na janela aberta…');
   await appendLog(ctx, 'Captcha detectado — aguardando a resolução na janela mobile.');
   if (ctx.settings.silentMode) {
-    await appendLog(ctx, 'Modo silencioso: trazendo a aba de execução para frente para você resolver.');
+    await appendLog(ctx, 'Modo silencioso: trazendo a aba de execução para frente para você resolver.', {
+      detail: true
+    });
   }
   await focusWindow(ctx.windowId, ctx.tabId);
   await notifyCaptcha(ctx.settings);
@@ -91,7 +93,9 @@ export async function requireManualLogin(ctx) {
   await updatePhase(PHASE.AUTH, 'Login manual necessário — faça login na versão desktop e execute novamente.');
   await appendLog(ctx, `⚠ ${message}`);
   if (ctx.settings.silentMode) {
-    await appendLog(ctx, 'Modo silencioso: trazendo a tela para frente; o login será aberto na versão desktop.');
+    await appendLog(ctx, 'Modo silencioso: trazendo a tela para frente; o login será aberto na versão desktop.', {
+      detail: true
+    });
   }
   await focusWindow(ctx.windowId, ctx.tabId);
   await notify(ctx.settings, {

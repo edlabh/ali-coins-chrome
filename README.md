@@ -58,6 +58,9 @@ desenvolvimento (testes/ícones) usam apenas Node.js ≥ 20 e Python 3.
      desmarque para acompanhar a execução numa janela visível;
    - **Notificação condicional** (opcional): avisar apenas quando houver novidade
      (check-in novo, crédito do dia ou tarefas executadas) — erros sempre avisam;
+   - **Log detalhado** (opcional): o extrato de cada execução é **resumido por padrão**
+     (início, check-in, tarefas, captcha, erros); ative para registrar também as linhas
+     de diagnóstico (navegação/adoção de abas, beacons das fichas, leitura do extrato);
    - atraso inicial aleatório, pausas entre tarefas, máximo de ações, etc.
 4. Use **▶ Executar agora** no popup para validar o fluxo manualmente. Para inspecionar
    a janela mobile a qualquer momento, use **Abrir janela mobile** nas Opções (a tela

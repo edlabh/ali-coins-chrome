@@ -161,7 +161,7 @@ async function adoptTaskTab(ctx) {
   const postAlive = await chrome.tabs.get(candidate.id).catch(() => null);
   if (!postAlive) {
     await restoreTaskTab(ctx).catch(() => {});
-    await appendLog(ctx, 'A aba aberta pela tarefa foi fechada pelo controle de abas — seguindo na aba principal.');
+    await appendLog(ctx, 'A aba aberta pela tarefa foi fechada pelo controle de abas — seguindo na aba principal.', { detail: true });
     return false;
   }
 
@@ -170,7 +170,7 @@ async function adoptTaskTab(ctx) {
     await applySilentEmulation(candidate.id, ctx.settings).catch(() => {});
   }
   await sleepAbortable(900);
-  await appendLog(ctx, 'Tarefa aberta em nova aba — adotada para a execução da rodada.');
+  await appendLog(ctx, 'Tarefa aberta em nova aba — adotada para a execução da rodada.', { detail: true });
   return true;
 }
 
@@ -208,7 +208,7 @@ async function restoreTaskTab(ctx) {
  */
 async function runSurpriseTaps(ctx) {
   const feedUrl = await getTabUrl(ctx.tabId);
-  await appendLog(ctx, `Surpresas: rodada em ${truncate(feedUrl || '', 80)}.`);
+  await appendLog(ctx, `Surpresas: rodada em ${truncate(feedUrl || '', 80)}.`, { detail: true });
   // Memória do dia (persistente entre execuções, paridade com o arquivo por dia
   // da referência) + tentativas desta rodada. P3: o card entra na memória no
   // CLIQUE bem-sucedido (como a origem) — repetir o mesmo toque não conta
@@ -241,7 +241,8 @@ async function runSurpriseTaps(ctx) {
           : '';
       await appendLog(
         ctx,
-        `Feed de surpresas: ${res.debug.raw} card(s) no DOM (${res.debug.visible} visíveis, .feeds-discount-card=${res.debug.discount ?? '?'}).${links}${classes}`
+        `Feed de surpresas: ${res.debug.raw} card(s) no DOM (${res.debug.visible} visíveis, .feeds-discount-card=${res.debug.discount ?? '?'}).${links}${classes}`,
+        { detail: true }
       );
     }
 
@@ -249,13 +250,17 @@ async function runSurpriseTaps(ctx) {
       // Sem item novo: recarrega o feed UMA vez para buscar cards diferentes.
       if (!feedReloaded && feedUrl) {
         feedReloaded = true;
-        await appendLog(ctx, 'Feed de surpresas sem itens novos — recarregando uma vez.');
+        await appendLog(ctx, 'Feed de surpresas sem itens novos — recarregando uma vez.', {
+          detail: true
+        });
         await navigateTab(ctx.tabId, feedUrl, 30000).catch(() => {});
         res = await tapOnce();
         if (res === null) break;
       }
       if (!res || !res.clicked) {
-        await appendLog(ctx, `Feed de surpresas sem itens novos após ${clicked} toque(s).`);
+        await appendLog(ctx, `Feed de surpresas sem itens novos após ${clicked} toque(s).`, {
+          detail: true
+        });
         break;
       }
     }
@@ -320,7 +325,8 @@ async function settleAfterSurpriseTap(ctx, beforeUrl, feedUrl) {
     const mission = /[?&](from=mission|idem_id=)/i.test(item.url || '') ? 'sim' : 'não';
     await appendLog(
       ctx,
-      `Ficha do item: ${truncate(item.url || '(sem URL)', 90)} (missão: ${mission}), ${Number.isFinite(item.tracking) ? item.tracking : 0} beacon(s)${vis} (diagnóstico).`
+      `Ficha do item: ${truncate(item.url || '(sem URL)', 90)} (missão: ${mission}), ${Number.isFinite(item.tracking) ? item.tracking : 0} beacon(s)${vis} (diagnóstico).`,
+      { detail: true }
     );
     await sleepAbortable(600);
     return { opened: true };
@@ -469,7 +475,8 @@ export async function runTasksPhase(ctx) {
             ctx,
             kind === 'surprise'
               ? `Tarefa ignorada (opção das Opções): ${truncate(t.title, 60)}.`
-              : `Tarefa ignorada (exclusiva do app): ${truncate(t.title, 60)}.`
+              : `Tarefa ignorada (exclusiva do app): ${truncate(t.title, 60)}.`,
+            { detail: true }
           );
         }
       }
@@ -510,7 +517,8 @@ export async function runTasksPhase(ctx) {
         ctx,
         `Possível progresso tardio em ${lateCandidates.length} tarefa(s) (${lateCandidates
           .map((c) => truncate(c.title, 40))
-          .join(' | ')}); relendo o painel em ${Math.round(LATE_PROGRESS_CONFIRM_MS / 1000)}s antes de desistir.`
+          .join(' | ')}); relendo o painel em ${Math.round(LATE_PROGRESS_CONFIRM_MS / 1000)}s antes de desistir.`,
+        { detail: true }
       );
       await sleepAbortable(LATE_PROGRESS_CONFIRM_MS);
       const confirm = await safeTaskCommand(ctx, CMD.EXTRACT_TASKS, {}, 'tasks');
@@ -525,7 +533,9 @@ export async function runTasksPhase(ctx) {
           disabled: disabledTitles
         });
         for (const title of confirmed) {
-          await appendLog(ctx, `Progresso tardio confirmado em "${truncate(title, 60)}".`);
+          await appendLog(ctx, `Progresso tardio confirmado em "${truncate(title, 60)}".`, {
+            detail: true
+          });
         }
       }
     }
@@ -568,7 +578,9 @@ export async function runTasksPhase(ctx) {
           : 'exclusiva do app';
       if (!stats.skipped.includes(next.title)) {
         stats.skipped.push(next.title || '(sem título)');
-        await appendLog(ctx, `Tarefa ignorada (${reason}): ${truncate(next.title, 60)}.`);
+        await appendLog(ctx, `Tarefa ignorada (${reason}): ${truncate(next.title, 60)}.`, {
+          detail: true
+        });
       }
       await updatePhase(PHASE.TASKS, `Ignorando tarefa (${reason}): ${truncate(next.title, 48)}`);
       continue;
@@ -692,7 +704,8 @@ export async function runTasksPhase(ctx) {
           : 'nenhum';
         await appendLog(
           ctx,
-          `Surpresas: GO clicado — navegou: ${navigated ? 'sim' : 'não'}, aba nova adotada: ${adopted ? 'sim' : 'não'}, window.open: ${opensTxt} (feed: ${truncate(await getTabUrl(ctx.tabId), 70)}).`
+          `Surpresas: GO clicado — navegou: ${navigated ? 'sim' : 'não'}, aba nova adotada: ${adopted ? 'sim' : 'não'}, window.open: ${opensTxt} (feed: ${truncate(await getTabUrl(ctx.tabId), 70)}).`,
+          { detail: true }
         );
         actionRes = await runSurpriseTaps(ctx);
       } else {
