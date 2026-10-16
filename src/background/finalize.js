@@ -187,18 +187,38 @@ function mapErrorPhase(status) {
   return PHASE.ERROR;
 }
 
+/**
+ * Mensagem de conclusão (popup + notificação). Em sucesso mostra os VALORES
+ * adquiridos: check-in e tarefas (delta de saldo) — sem contar quantas tarefas
+ * foram executadas (as tarefas aparecem em detalhe no extrato/popup).
+ * @param {object} report
+ * @returns {string}
+ */
 export function describeReport(report) {
   const parts = [];
   const c = report.checkin;
-  if (c) {
-    if (c.justCollected) parts.push(`check-in +${c.coins ?? '?'} moedas`);
-    else if (c.already) parts.push('check-in já feito hoje');
-    else parts.push('check-in não confirmado');
+  // Valor adquirido com o CHECK-IN: prioriza o crédito do dia no extrato
+  // (fonte de verdade da contabilidade) e cai no valor do modal mobile.
+  const checkinCoins =
+    c && Number.isFinite(c.coinsGainedToday)
+      ? c.coinsGainedToday
+      : c && Number.isFinite(c.coins)
+        ? c.coins
+        : null;
+  if (checkinCoins !== null) {
+    parts.push(`Check-in: +${checkinCoins} moedas`);
+  } else if (c && c.already) {
+    parts.push('Check-in: já realizado hoje');
+  } else if (c) {
+    parts.push('Check-in: não confirmado');
   }
-  const acted = (report.tasks || []).length;
-  if (acted) parts.push(`${acted} ação(ões) de tarefas`);
-  else if (c && c.already) parts.push('sem tarefas novas');
-  if (report.gained !== null) parts.push(`saldo ${report.gained >= 0 ? '+' : ''}${report.gained}`);
+  // Valor adquirido com as TAREFAS (delta de saldo) — sem contagem de tarefas.
+  if (Number.isFinite(report.tasksGained)) {
+    parts.push(`Tarefas: +${report.tasksGained} moedas`);
+  }
+  if (Number.isFinite(report.gained)) {
+    parts.push(`saldo ${report.gained >= 0 ? '+' : ''}${report.gained}`);
+  }
   parts.push(`duração ${formatDuration(report.durationMs)}`);
   if (report.status !== RUN_STATUS.SUCCESS) {
     parts.push(`status: ${report.status}`);

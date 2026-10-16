@@ -34,7 +34,7 @@ import {
 import { ensureCoinPage, isCoinUrl } from '../src/background/tabs.js';
 import { clearDeviceRules, registerAuxTab, unregisterAuxTab } from '../src/background/tabs.js';
 import { ensureAuthenticated } from '../src/background/auth.js';
-import { applyWindowPolicy } from '../src/background/finalize.js';
+import { applyWindowPolicy, describeReport } from '../src/background/finalize.js';
 import {
   coinsFromStreak,
   streakFromCoins,
@@ -598,6 +598,55 @@ test('storage: saveSettings descarta campos legados (credenciais/cooldown) e man
     if (originalChrome === undefined) delete globalThis.chrome;
     else globalThis.chrome = originalChrome;
   }
+});
+
+test('describeReport (sucesso): mostra valor do check-in e das tarefas, sem contagem', () => {
+  // Check-in já coletado no dia (crédito do extrato) + tarefas com delta.
+  const report = buildReport({
+    runId: 'r',
+    reason: 'manual',
+    startedAt: 0,
+    endedAt: 60000,
+    status: 'success',
+    checkin: { already: true, coinsGainedToday: 1 },
+    balanceBefore: 100,
+    balanceAfter: 112,
+    tasks: [
+      { title: 'A', kind: 'scroll', result: 'attempt' },
+      { title: 'B', kind: 'scroll', result: 'attempt' }
+    ],
+    skipped: [],
+    errors: [],
+    captchaEvents: 0,
+    log: []
+  });
+  report.tasksGained = 11;
+  const msg = describeReport(report);
+  assert.match(msg, /Check-in: \+1 moedas/);
+  assert.match(msg, /Tarefas: \+11 moedas/);
+  assert.doesNotMatch(msg, /ação\(ões\)/, 'não mostra a contagem de tarefas');
+
+  // Check-in novo (modal/estimativa) — o valor do check-in aparece.
+  const fresh = buildReport({
+    runId: 'r2',
+    reason: 'manual',
+    startedAt: 0,
+    endedAt: 30000,
+    status: 'success',
+    checkin: { justCollected: true, coins: 40 },
+    balanceBefore: 10,
+    balanceAfter: 55,
+    tasks: [{ title: 'A', kind: 'scroll', result: 'attempt' }],
+    skipped: [],
+    errors: [],
+    captchaEvents: 0,
+    log: []
+  });
+  fresh.tasksGained = 5;
+  const msg2 = describeReport(fresh);
+  assert.match(msg2, /Check-in: \+40 moedas/);
+  assert.match(msg2, /Tarefas: \+5 moedas/);
+  assert.doesNotMatch(msg2, /ação\(ões\)/);
 });
 
 test('context: appendLog resume por padrão e só mostra diagnósticos com "Log detalhado"', async () => {
