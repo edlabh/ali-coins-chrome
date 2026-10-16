@@ -214,22 +214,28 @@ function mapErrorPhase(status) {
 
 /**
  * Mensagem de conclusão (popup + notificação). Em sucesso mostra os VALORES
- * adquiridos: check-in e tarefas (delta de saldo) — sem contar quantas tarefas
- * foram executadas (as tarefas aparecem em detalhe no extrato/popup).
+ * adquiridos ATUALIZADOS PELO EXTRATO (página mycoin): Bônus diário (check-in),
+ * Missões de moedas (soma das tarefas) e, quando existir, o recuperado por
+ * cancelamento de pedido — sem contar quantas tarefas foram executadas.
+ * Sem extrato (erros/falhas de leitura), cai nos valores do run.
  * @param {object} report
  * @returns {string}
  */
 export function describeReport(report) {
   const parts = [];
   const c = report.checkin;
-  // Valor adquirido com o CHECK-IN: prioriza o crédito do dia no extrato
-  // (fonte de verdade da contabilidade) e cai no valor do modal mobile.
+  const ledger = report.ledger || null;
+  // Valor do CHECK-IN: prioriza o Bônus diário do EXTRATO (fonte de verdade,
+  // atualizada a cada rodada — inclusive quando o check-in já foi coletado);
+  // fallback: crédito do dia / modal mobile.
   const checkinCoins =
-    c && Number.isFinite(c.coinsGainedToday)
-      ? c.coinsGainedToday
-      : c && Number.isFinite(c.coins)
-        ? c.coins
-        : null;
+    ledger && Number.isFinite(ledger.bonusCoins)
+      ? ledger.bonusCoins
+      : c && Number.isFinite(c.coinsGainedToday)
+        ? c.coinsGainedToday
+        : c && Number.isFinite(c.coins)
+          ? c.coins
+          : null;
   if (checkinCoins !== null) {
     parts.push(`Check-in: +${checkinCoins} moedas`);
   } else if (c && c.already) {
@@ -237,9 +243,20 @@ export function describeReport(report) {
   } else if (c) {
     parts.push('Check-in: não confirmado');
   }
-  // Valor adquirido com as TAREFAS (delta de saldo) — sem contagem de tarefas.
-  if (Number.isFinite(report.tasksGained)) {
-    parts.push(`Tarefas: +${report.tasksGained} moedas`);
+  // Valor das TAREFAS: prioriza a soma das Missões de moedas no EXTRATO;
+  // fallback: delta de saldo do run.
+  const tasksValue =
+    ledger && Number.isFinite(ledger.missionsCoins)
+      ? ledger.missionsCoins
+      : Number.isFinite(report.tasksGained)
+        ? report.tasksGained
+        : null;
+  if (tasksValue !== null) {
+    parts.push(`Tarefas: +${tasksValue} moedas`);
+  }
+  // Recuperado por cancelamento de pedido (somente quando existir no extrato).
+  if (ledger && Number.isFinite(ledger.refundCoins) && ledger.refundCoins > 0) {
+    parts.push(`Recuperado: +${ledger.refundCoins} moedas`);
   }
   if (Number.isFinite(report.gained)) {
     parts.push(`saldo ${report.gained >= 0 ? '+' : ''}${report.gained}`);

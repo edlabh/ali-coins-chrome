@@ -600,8 +600,9 @@ test('storage: saveSettings descarta campos legados (credenciais/cooldown) e man
   }
 });
 
-test('describeReport (sucesso): mostra valor do check-in e das tarefas, sem contagem', () => {
-  // Check-in já coletado no dia (crédito do extrato) + tarefas com delta.
+test('describeReport (sucesso): valores ATUALIZADOS PELO EXTRATO (bônus, missões e recuperado)', () => {
+  // Com extrato: Bônus diário, Missões de moedas e Recuperado vêm da página
+  // mycoin — mesmo com check-in já coletado antes do run.
   const report = buildReport({
     runId: 'r',
     reason: 'manual',
@@ -621,12 +622,15 @@ test('describeReport (sucesso): mostra valor do check-in e das tarefas, sem cont
     log: []
   });
   report.tasksGained = 11;
+  report.ledger = { bonusCoins: 40, missionsCoins: 46, refundCoins: 12 };
   const msg = describeReport(report);
-  assert.match(msg, /Check-in: \+1 moedas/);
-  assert.match(msg, /Tarefas: \+11 moedas/);
+  assert.match(msg, /Check-in: \+40 moedas/, 'bônus diário do extrato tem prioridade');
+  assert.match(msg, /Tarefas: \+46 moedas/, 'missões de moedas do extrato têm prioridade');
+  assert.match(msg, /Recuperado: \+12 moedas/, 'recuperado por cancelamento aparece quando existe');
   assert.doesNotMatch(msg, /ação\(ões\)/, 'não mostra a contagem de tarefas');
 
-  // Check-in novo (modal/estimativa) — o valor do check-in aparece.
+  // Sem extrato (leitura indisponível): cai nos valores do run e NÃO mostra
+  // a linha de recuperado.
   const fresh = buildReport({
     runId: 'r2',
     reason: 'manual',
@@ -646,6 +650,7 @@ test('describeReport (sucesso): mostra valor do check-in e das tarefas, sem cont
   const msg2 = describeReport(fresh);
   assert.match(msg2, /Check-in: \+40 moedas/);
   assert.match(msg2, /Tarefas: \+5 moedas/);
+  assert.doesNotMatch(msg2, /Recuperado/);
   assert.doesNotMatch(msg2, /ação\(ões\)/);
 });
 
